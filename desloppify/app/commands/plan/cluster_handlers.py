@@ -24,6 +24,51 @@ from desloppify.engine.plan import (
 from desloppify.state import utc_now
 
 _LEADING_NUM_RE = re.compile(r'^\d+\.\s*')
+_HEX8_RE = re.compile(r'^[0-9a-f]{8}$')
+
+
+def _suggest_close_matches(state: dict, plan: dict | None, patterns: list[str]) -> None:
+    """Print fuzzy match suggestions for patterns that resolved to zero issues."""
+    all_ids: list[str] = list(state.get("issues", {}).keys())
+    if plan is not None:
+        seen_ids: set[str] = set(all_ids)
+        for fid in plan.get("queue_order", []):
+            if fid not in seen_ids:
+                seen_ids.add(fid)
+                all_ids.append(fid)
+        for cluster in plan.get("clusters", {}).values():
+            for fid in cluster.get("issue_ids", []):
+                if fid not in seen_ids:
+                    seen_ids.add(fid)
+                    all_ids.append(fid)
+
+    for pattern in patterns:
+        segments = pattern.split("::")
+        last_seg = segments[-1]
+        suggestions: list[str] = []
+
+        if _HEX8_RE.match(last_seg):
+            suggestions = [fid for fid in all_ids if fid.endswith(f"::{last_seg}") or fid == last_seg]
+            if suggestions:
+                print(colorize(f"  No match for: {pattern!r}", "yellow"))
+                print(colorize("  Did you mean:", "dim"))
+                for m in suggestions[:3]:
+                    print(colorize(f"    {m}", "dim"))
+                print(colorize(f"  Tip: match by hash suffix alone: {last_seg}", "dim"))
+            continue
+
+        # Try last segment and second-to-last as descriptive name slugs
+        slug = segments[-2] if len(segments) >= 2 else ""
+        for fid in all_ids:
+            if f"::{last_seg}::" in fid or fid.endswith(f"::{last_seg}"):
+                suggestions.append(fid)
+            elif slug and (f"::{slug}::" in fid or fid.endswith(f"::{slug}")):
+                suggestions.append(fid)
+        if suggestions:
+            print(colorize(f"  No match for: {pattern!r}", "yellow"))
+            print(colorize("  Did you mean:", "dim"))
+            for m in suggestions[:3]:
+                print(colorize(f"    {m}", "dim"))
 
 
 def _print_pattern_hints() -> None:
@@ -67,13 +112,22 @@ def _cmd_cluster_add(args: argparse.Namespace) -> None:
 
     cluster_name: str = getattr(args, "cluster_name", "")
     patterns: list[str] = getattr(args, "patterns", [])
+    dry_run: bool = getattr(args, "dry_run", False)
 
     plan = load_plan()
     issue_ids = resolve_ids_from_patterns(state, patterns, plan=plan)
     if not issue_ids:
         print(colorize("  No matching issues found.", "yellow"))
         _print_pattern_hints()
+        _suggest_close_matches(state, plan, patterns)
         return
+
+    if dry_run:
+        print(colorize(f"  [dry-run] Would add {len(issue_ids)} item(s) to {cluster_name}:", "cyan"))
+        for fid in issue_ids:
+            print(colorize(f"    {fid}", "dim"))
+        return
+
     try:
         count = add_to_cluster(plan, cluster_name, issue_ids)
     except ValueError as ex:
@@ -110,13 +164,22 @@ def _cmd_cluster_remove(args: argparse.Namespace) -> None:
 
     cluster_name: str = getattr(args, "cluster_name", "")
     patterns: list[str] = getattr(args, "patterns", [])
+    dry_run: bool = getattr(args, "dry_run", False)
 
     plan = load_plan()
     issue_ids = resolve_ids_from_patterns(state, patterns, plan=plan)
     if not issue_ids:
         print(colorize("  No matching issues found.", "yellow"))
         _print_pattern_hints()
+        _suggest_close_matches(state, plan, patterns)
         return
+
+    if dry_run:
+        print(colorize(f"  [dry-run] Would remove {len(issue_ids)} item(s) from {cluster_name}:", "cyan"))
+        for fid in issue_ids:
+            print(colorize(f"    {fid}", "dim"))
+        return
+
     try:
         count = remove_from_cluster(plan, cluster_name, issue_ids)
     except ValueError as ex:
@@ -149,6 +212,7 @@ def _cmd_cluster_reorder(args: argparse.Namespace) -> None:
     cluster_names: list[str] = [n.strip() for n in raw_names.split(",") if n.strip()]
     position: str = getattr(args, "position", "top")
     target: str | None = getattr(args, "target", None)
+    item_pattern: str | None = getattr(args, "item_pattern", None)
 
     plan = load_plan()
     clusters = plan.get("clusters", {})
@@ -159,10 +223,80 @@ def _cmd_cluster_reorder(args: argparse.Namespace) -> None:
             print(colorize(f"  Cluster {name!r} does not exist.", "red"))
             return
 
-    # Resolve cluster-name targets for before/after
+    if item_pattern is not None:
+        # Within-cluster item reorder
+        if len(cluster_names) != 1:
+            print(colorize("  --item requires exactly one cluster name.", "red"))
+            return
+        cluster_name = cluster_names[0]
+        cluster_member_set = set(clusters[cluster_name].get("issue_ids", []))
+
+        state = command_runtime(args).state
+        item_ids = resolve_ids_from_patterns(state, [item_pattern], plan=plan)
+        if not item_ids:
+            print(colorize("  No matching issues found for --item pattern.", "yellow"))
+            return
+        for fid in item_ids:
+            if fid not in cluster_member_set:
+                print(colorize(f"  {fid!r} is not a member of cluster {cluster_name!r}.", "red"))
+                return
+
+        queue_order: list[str] = plan.get("queue_order", [])
+        ordered_slice = [fid for fid in queue_order if fid in cluster_member_set]
+
+        offset: int | None = None
+        resolved_target: str | None = None
+        item_set = set(item_ids)
+
+        if position == "top":
+            first_non_item = next((fid for fid in ordered_slice if fid not in item_set), None)
+            if first_non_item is None or set(ordered_slice[:len(item_ids)]) == item_set:
+                print(colorize("  Already at the top of the cluster.", "yellow"))
+                return
+            resolved_target = first_non_item
+            position = "before"
+        elif position == "bottom":
+            last_non_item = next((fid for fid in reversed(ordered_slice) if fid not in item_set), None)
+            if last_non_item is None or set(ordered_slice[-len(item_ids):]) == item_set:
+                print(colorize("  Already at the bottom of the cluster.", "yellow"))
+                return
+            resolved_target = last_non_item
+            position = "after"
+        elif position in ("before", "after"):
+            if target is None:
+                print(colorize(f"  '{position}' requires a target. Example: --item PAT {position} TARGET", "red"))
+                return
+            target_ids = resolve_ids_from_patterns(state, [target], plan=plan)
+            if not target_ids:
+                print(colorize(f"  No match for target {target!r}.", "yellow"))
+                return
+            resolved_target = target_ids[0]
+            if resolved_target not in cluster_member_set:
+                print(colorize(f"  Target {resolved_target!r} is not in cluster {cluster_name!r}.", "red"))
+                return
+        elif position in ("up", "down"):
+            if target is None:
+                print(colorize(f"  '{position}' requires an offset. Example: --item PAT {position} 3", "red"))
+                return
+            try:
+                offset = int(target)
+            except (ValueError, TypeError):
+                print(colorize(f"  Invalid offset: {target}", "red"))
+                return
+
+        count = move_items(plan, item_ids, position, target=resolved_target, offset=offset)
+        append_log_entry(
+            plan, "cluster_reorder", cluster_name=cluster_name, actor="user",
+            detail={"position": position, "count": count, "item": item_pattern},
+        )
+        save_plan(plan)
+        print(colorize(f"  Moved {count} item(s) to {position} within cluster {cluster_name}.", "green"))
+        return
+
+    # Whole-cluster block reorder (original behaviour)
     target = resolve_target(plan, target, position)
 
-    offset: int | None = None
+    offset = None
     if position in ("up", "down") and target is not None:
         try:
             offset = int(target)
@@ -171,7 +305,6 @@ def _cmd_cluster_reorder(args: argparse.Namespace) -> None:
             return
         target = None
 
-    # Collect all member IDs from all clusters, preserving order, deduplicating
     seen: set[str] = set()
     all_member_ids: list[str] = []
     for name in cluster_names:
@@ -263,17 +396,58 @@ def _cmd_cluster_list(args: argparse.Namespace) -> None:
     plan = load_plan()
     clusters = plan.get("clusters", {})
     active = plan.get("active_cluster")
+    verbose: bool = getattr(args, "verbose", False)
+
     if not clusters:
         print("  No clusters defined.")
         return
-    print(colorize("  Clusters:", "bold"))
-    for name, cluster in clusters.items():
+
+    queue_order: list[str] = plan.get("queue_order", [])
+    pos_map = {fid: i for i, fid in enumerate(queue_order)}
+
+    def _min_pos(cluster_data: dict) -> int:
+        positions = [pos_map[fid] for fid in cluster_data.get("issue_ids", []) if fid in pos_map]
+        return min(positions) if positions else 999_999
+
+    min_pos_cache = {name: _min_pos(c) for name, c in clusters.items()}
+    sorted_clusters = sorted(clusters.items(), key=lambda kv: min_pos_cache[kv[0]])
+
+    if verbose:
+        name_width = max(20, min(35, max(len(n) for n, _ in sorted_clusters)))
+        total = len(sorted_clusters)
+        print(colorize(f"  Clusters ({total} total, sorted by queue position):", "bold"))
+        print()
+        header = f"  {'#pos':<5}  {'Name':<{name_width}}  {'Items':>5}  {'Steps':>5}  {'Type':<6}  Description"
+        sep = f"  {'─'*4}  {'─'*name_width}  {'─'*5}  {'─'*5}  {'─'*6}  {'─'*45}"
+        print(colorize(header, "dim"))
+        print(colorize(sep, "dim"))
+        for name, cluster in sorted_clusters:
+            min_p = min_pos_cache[name]
+            pos_str = f"#{min_p}" if min_p < 999_999 else "—"
+            member_count = len(cluster.get("issue_ids", []))
+            steps = cluster.get("action_steps") or []
+            steps_str = str(len(steps)) if steps else "—"
+            type_str = "auto" if cluster.get("auto") else "manual"
+            desc = cluster.get("description") or ""
+            if not desc and min_p == 999_999 and not member_count:
+                desc = "(no queue position — no members)"
+            desc_truncated = (desc[:44] + "…") if len(desc) > 45 else desc
+            name_display = (name[:name_width - 1] + "…") if len(name) > name_width else name
+            focused = " *" if name == active else ""
+            print(f"  {pos_str:>5}  {name_display:<{name_width}}  {member_count:>5}  {steps_str:>5}  {type_str:<6}  {desc_truncated}{focused}")
+        print()
+        return
+
+    print(colorize("  Clusters (ordered by queue position):", "bold"))
+    for name, cluster in sorted_clusters:
+        min_p = min_pos_cache[name]
+        pos_str = f"#{min_p}" if min_p < 999_999 else "—"
         member_count = len(cluster.get("issue_ids", []))
         desc = cluster.get("description") or ""
         marker = " (focused)" if name == active else ""
         desc_str = f" — {desc}" if desc else ""
         auto_tag = " [auto]" if cluster.get("auto") else ""
-        print(f"    {name}: {member_count} items{auto_tag}{desc_str}{marker}")
+        print(f"    {pos_str:>5}  {name}: {member_count} items{auto_tag}{desc_str}{marker}")
 
 
 def _cmd_cluster_update(args: argparse.Namespace) -> None:

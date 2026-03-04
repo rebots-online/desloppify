@@ -226,11 +226,13 @@ examples:
     p_ca = cluster_sub.add_parser("add", help="Add issues to a cluster")
     p_ca.add_argument("cluster_name", type=str, help="Cluster name")
     p_ca.add_argument("patterns", nargs="+", metavar="PATTERN", help="Issue ID(s), detector, file path, glob, or cluster name")
+    p_ca.add_argument("--dry-run", action="store_true", default=False, help="Preview without saving")
 
     # plan cluster remove <cluster> <patterns...>
     p_cr = cluster_sub.add_parser("remove", help="Remove issues from a cluster")
     p_cr.add_argument("cluster_name", type=str, help="Cluster name")
     p_cr.add_argument("patterns", nargs="+", metavar="PATTERN", help="Issue ID(s), detector, file path, glob, or cluster name")
+    p_cr.add_argument("--dry-run", action="store_true", default=False, help="Preview without saving")
 
     # plan cluster delete <name>
     p_cd = cluster_sub.add_parser("delete", help="Delete a cluster")
@@ -244,13 +246,19 @@ examples:
         help="Where to move",
     )
     p_cm.add_argument("target", nargs="?", default=None, help="Target issue/cluster (before/after) or integer offset (up/down)")
+    p_cm.add_argument(
+        "--item", dest="item_pattern", default=None, metavar="PATTERN",
+        help="Move a specific item within the cluster (omit to move whole cluster as a block)",
+    )
 
     # plan cluster show <name>
     p_cs = cluster_sub.add_parser("show", help="Show cluster details and members")
     p_cs.add_argument("cluster_name", type=str, help="Cluster name")
 
     # plan cluster list
-    cluster_sub.add_parser("list", help="List all clusters")
+    p_cl = cluster_sub.add_parser("list", help="List all clusters")
+    p_cl.add_argument("--verbose", "-v", action="store_true", default=False,
+                      help="Show queue position, steps count, and description as a table")
 
     # plan cluster merge <source> <target>
     p_cmerge = cluster_sub.add_parser("merge", help="Merge source cluster into target (moves issues, deletes source)")
