@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypedDict
 
-from desloppify.engine._plan.subjective_policy import NON_OBJECTIVE_DETECTORS
 from desloppify.engine._work_queue.context import QueueContext
 from desloppify.engine._work_queue.helpers import (
     ALL_STATUSES,
     ATTEST_EXAMPLE,
     scope_matches,
 )
+from desloppify.engine._work_queue.lifecycle import apply_lifecycle_filter
 from desloppify.engine._work_queue.plan_order import (
     collapse_clusters,
     enrich_plan_metadata,
@@ -124,7 +124,7 @@ def build_work_queue(
     new_ids, skipped = _plan_presort(items, state, plan)
 
     # 4. Lifecycle filter — endgame-only items filtered when objective work remains
-    items = _apply_lifecycle_filter(items)
+    items = apply_lifecycle_filter(items)
 
     # 5. Sort & plan post-processing
     items.sort(key=item_sort_key)
@@ -186,7 +186,7 @@ def _gather_subjective_items(
 ) -> list[WorkQueueItem]:
     """Build subjective dimension candidates.
 
-    Lifecycle filtering (endgame gating) happens in _apply_lifecycle_filter,
+    Lifecycle filtering (endgame gating) happens in ``apply_lifecycle_filter``,
     not here. This function only handles configuration and scope.
     """
     if not opts.include_subjective:
@@ -263,74 +263,6 @@ def _plan_postsort(
     if opts.include_skipped:
         items.extend(skipped)
     stamp_positions(items, plan)
-
-
-def _has_objective_items(items: list[WorkQueueItem]) -> bool:
-    """True if any objective mechanical work items remain in the queue."""
-    return any(
-        i.get("kind") == "issue"
-        and i.get("detector", "") not in NON_OBJECTIVE_DETECTORS
-        for i in items
-    )
-
-
-def _has_initial_reviews(items: list[WorkQueueItem]) -> bool:
-    """True if any unassessed subjective dimensions need initial review."""
-    return any(
-        i.get("kind") == "subjective_dimension"
-        and i.get("initial_review")
-        for i in items
-    )
-
-
-def _is_endgame_only(item: WorkQueueItem) -> bool:
-    """True if this item should only appear when the objective queue is drained."""
-    return (
-        item.get("kind") == "subjective_dimension"
-        and not item.get("initial_review")
-    )
-
-
-def _has_triage_stages(items: list[WorkQueueItem]) -> bool:
-    """True if any pending triage stage items are in the queue."""
-    return any(
-        i.get("kind") == "workflow_stage"
-        and str(i.get("id", "")).startswith("triage::")
-        for i in items
-    )
-
-
-def _apply_lifecycle_filter(items: list[WorkQueueItem]) -> list[WorkQueueItem]:
-    """Enforce lifecycle visibility rules.
-
-    The queue enforces a phase order: scan → initial review → triage → objective work.
-
-    1. **Initial reviews pending** → only show initial-review subjective items.
-       The user must complete first-time reviews before working objective items.
-    2. **Triage in progress** → only show triage stages and workflow items.
-       Cluster work items aren't ready until triage completes (enrich adds
-       the detail that makes steps actionable).
-    3. **Objective work remains** → show objective items, hide endgame-only
-       subjective reassessments (stale re-reviews).
-    4. **Objective drained** → everything visible (endgame).
-    """
-    if _has_initial_reviews(items):
-        # Phase 1: only initial reviews visible — triage and workflow
-        # items stay hidden until initial reviews are complete.
-        return [
-            i for i in items
-            if i.get("kind") == "subjective_dimension" and i.get("initial_review")
-        ]
-    if _has_triage_stages(items):
-        # Phase 2: triage in progress — only triage stages and workflow items visible.
-        # Cluster work items aren't ready until enrich completes.
-        return [
-            i for i in items
-            if i.get("kind") in ("workflow_stage", "workflow_action")
-        ]
-    if not _has_objective_items(items):
-        return items  # endgame: everything visible
-    return [i for i in items if not _is_endgame_only(i)]
 
 
 def _empty_queue_fallback(plan: dict | None) -> list[WorkQueueItem]:
