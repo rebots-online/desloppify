@@ -105,6 +105,46 @@ def _config_and_legacy_kwargs_conflict(
     ]
 
 
+def _resolve_import_load_config(
+    *,
+    config: ImportLoadConfig | None,
+    lang_name: str | None,
+    allow_partial: bool,
+    trusted_assessment_source: bool,
+    trusted_assessment_label: str | None,
+    attested_external: bool,
+    manual_override: bool,
+    manual_attest: str | None,
+) -> tuple[ImportLoadConfig | None, list[str]]:
+    """Resolve legacy kwargs into ImportLoadConfig while preserving conflict checks."""
+    conflict_errors = _config_and_legacy_kwargs_conflict(
+        config=config,
+        lang_name=lang_name,
+        allow_partial=allow_partial,
+        trusted_assessment_source=trusted_assessment_source,
+        trusted_assessment_label=trusted_assessment_label,
+        attested_external=attested_external,
+        manual_override=manual_override,
+        manual_attest=manual_attest,
+    )
+    if conflict_errors:
+        return None, conflict_errors
+    if config is not None:
+        return config, []
+    return (
+        ImportLoadConfig(
+            lang_name=lang_name,
+            allow_partial=allow_partial,
+            trusted_assessment_source=trusted_assessment_source,
+            trusted_assessment_label=trusted_assessment_label,
+            attested_external=attested_external,
+            manual_override=manual_override,
+            manual_attest=manual_attest,
+        ),
+        [],
+    )
+
+
 def _normalize_import_payload_shape(
     payload: dict[str, Any],
 ) -> tuple[ReviewImportPayload | None, list[str]]:
@@ -179,42 +219,14 @@ def _normalize_import_payload_shape(
 def _parse_and_validate_import(
     import_file: str,
     *,
-    config: ImportLoadConfig | None = None,
-    lang_name: str | None = None,
-    allow_partial: bool = False,
-    trusted_assessment_source: bool = False,
-    trusted_assessment_label: str | None = None,
-    attested_external: bool = False,
-    manual_override: bool = False,
-    manual_attest: str | None = None,
+    config: ImportLoadConfig,
 ) -> tuple[ReviewImportPayload | None, list[str]]:
     """Parse and validate a review import file (pure function).
 
     Returns ``(data, errors)`` where *data* is the normalized payload on
     success, or ``None`` when errors prevent import.
     """
-    conflict_errors = _config_and_legacy_kwargs_conflict(
-        config=config,
-        lang_name=lang_name,
-        allow_partial=allow_partial,
-        trusted_assessment_source=trusted_assessment_source,
-        trusted_assessment_label=trusted_assessment_label,
-        attested_external=attested_external,
-        manual_override=manual_override,
-        manual_attest=manual_attest,
-    )
-    if conflict_errors:
-        return None, conflict_errors
-
-    options = config or ImportLoadConfig(
-        lang_name=lang_name,
-        allow_partial=allow_partial,
-        trusted_assessment_source=trusted_assessment_source,
-        trusted_assessment_label=trusted_assessment_label,
-        attested_external=attested_external,
-        manual_override=manual_override,
-        manual_attest=manual_attest,
-    )
+    options = config
     issues_path = Path(import_file)
     if not issues_path.exists():
         return None, [f"file not found: {import_file}"]
@@ -339,7 +351,7 @@ def load_import_issues_data(
     Raises ``ImportPayloadLoadError`` when validation fails.
     """
     _ = colorize_fn
-    conflict_errors = _config_and_legacy_kwargs_conflict(
+    options, conflict_errors = _resolve_import_load_config(
         config=config,
         lang_name=lang_name,
         allow_partial=allow_partial,
@@ -352,15 +364,8 @@ def load_import_issues_data(
     if conflict_errors:
         raise ImportPayloadLoadError(conflict_errors)
 
-    options = config or ImportLoadConfig(
-        lang_name=lang_name,
-        allow_partial=allow_partial,
-        trusted_assessment_source=trusted_assessment_source,
-        trusted_assessment_label=trusted_assessment_label,
-        attested_external=attested_external,
-        manual_override=manual_override,
-        manual_attest=manual_attest,
-    )
+    if options is None:
+        raise ValueError("resolved import options missing after conflict validation")
     data, errors = _parse_and_validate_import(
         import_file,
         config=options,
