@@ -6,6 +6,33 @@ from desloppify.intelligence.review._context.models import HolisticContext
 
 from .prepare_batches_core import _collect_unique_files, _representative_files_for_directory
 
+_AUTH_SIBLING_PER_DIRECTORY_LIMIT = 2
+_AUTH_SIBLING_PER_MODULE_LIMIT = 1
+
+
+def _path_directory(rpath: str) -> str:
+    if "/" not in rpath:
+        return "."
+    return rpath.rsplit("/", 1)[0]
+
+
+def _path_module(rpath: str) -> str:
+    stripped = rpath.lstrip("/")
+    if not stripped:
+        return ""
+    return stripped.split("/", 1)[0]
+
+
+def _to_int(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
 
 def _authorization_files(
     ctx: HolisticContext,
@@ -15,9 +42,43 @@ def _authorization_files(
     """Files relevant to authorization dimension."""
     auth_ctx = ctx.authorization
     auth_files: list[dict] = []
-    for rpath, info in auth_ctx.get("route_auth_coverage", {}).items():
-        if info.get("without_auth", 0) > 0:
+    route_auth_coverage = auth_ctx.get("route_auth_coverage", {})
+    gap_directories: set[str] = set()
+    gap_modules: set[str] = set()
+    with_auth_routes: list[str] = []
+    if isinstance(route_auth_coverage, dict):
+        for rpath, info in sorted(route_auth_coverage.items()):
+            if not isinstance(rpath, str) or not isinstance(info, dict):
+                continue
+            without_auth = _to_int(info.get("without_auth", 0))
+            with_auth = _to_int(info.get("with_auth", 0))
+            if without_auth > 0:
+                auth_files.append({"file": rpath})
+                gap_directories.add(_path_directory(rpath))
+                gap_modules.add(_path_module(rpath))
+                continue
+            if with_auth > 0:
+                with_auth_routes.append(rpath)
+
+    sibling_dir_counts: dict[str, int] = {}
+    sibling_module_counts: dict[str, int] = {}
+    for rpath in with_auth_routes:
+        directory = _path_directory(rpath)
+        module = _path_module(rpath)
+        if (
+            directory in gap_directories
+            and sibling_dir_counts.get(directory, 0) < _AUTH_SIBLING_PER_DIRECTORY_LIMIT
+        ):
             auth_files.append({"file": rpath})
+            sibling_dir_counts[directory] = sibling_dir_counts.get(directory, 0) + 1
+            continue
+        if (
+            module in gap_modules
+            and sibling_module_counts.get(module, 0) < _AUTH_SIBLING_PER_MODULE_LIMIT
+        ):
+            auth_files.append({"file": rpath})
+            sibling_module_counts[module] = sibling_module_counts.get(module, 0) + 1
+
     for rpath in auth_ctx.get("service_role_usage", []):
         auth_files.append({"file": rpath})
     rls_coverage = auth_ctx.get("rls_coverage", {})

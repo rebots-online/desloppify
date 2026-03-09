@@ -258,6 +258,50 @@ def test_collectors_scope_payload_parts_and_orchestration_helpers(monkeypatch, t
     assert dim_ctx.lang_guide == "guide"
 
 
+def test_authorization_collector_includes_with_auth_siblings_same_directory() -> None:
+    ctx = SimpleNamespace(
+        authorization={
+            "route_auth_coverage": {
+                "api/health.py": {"handlers": 1, "with_auth": 1, "without_auth": 0},
+                "routes/admin.py": {"handlers": 2, "with_auth": 0, "without_auth": 2},
+                "routes/reports.py": {"handlers": 3, "with_auth": 3, "without_auth": 0},
+                "routes/users.py": {"handlers": 2, "with_auth": 2, "without_auth": 0},
+            },
+            "service_role_usage": ["lib/supabase.ts"],
+            "rls_coverage": {},
+        }
+    )
+
+    files = collectors_structure_mod._authorization_files(ctx, max_files=10)
+
+    assert files[:4] == [
+        "routes/admin.py",
+        "routes/reports.py",
+        "routes/users.py",
+        "lib/supabase.ts",
+    ]
+
+
+def test_authorization_collector_uses_module_fallback_for_with_auth_siblings() -> None:
+    ctx = SimpleNamespace(
+        authorization={
+            "route_auth_coverage": {
+                "routes/admin/audit.py": {"handlers": 2, "with_auth": 0, "without_auth": 2},
+                "routes/internal/guarded.py": {"handlers": 2, "with_auth": 2, "without_auth": 0},
+                "ui/home.py": {"handlers": 1, "with_auth": 1, "without_auth": 0},
+            },
+            "service_role_usage": [],
+            "rls_coverage": {},
+        }
+    )
+
+    files = collectors_structure_mod._authorization_files(ctx, max_files=10)
+
+    assert "routes/admin/audit.py" in files
+    assert "routes/internal/guarded.py" in files
+    assert "ui/home.py" not in files
+
+
 def test_prepare_batches_core_path_normalization_rules() -> None:
     assert prepare_batches_core_mod._normalize_file_path(" src/app.py ") == "src/app.py"
     assert prepare_batches_core_mod._normalize_file_path('"README",') == "README"
