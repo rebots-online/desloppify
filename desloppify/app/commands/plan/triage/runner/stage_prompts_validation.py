@@ -17,6 +17,7 @@ def _validation_requirements(stage: str) -> str:
             "## Validation Requirements\n"
             "- Stage must be recorded with a 100+ char report\n"
             "- Report must mention recurring dimension names (if any exist)\n"
+            "- Report must account for every open review issue exactly once (no missing or duplicate hashes)\n"
             "- Stage must be confirmed with an 80+ char attestation\n"
         )
     if stage == "organize":

@@ -169,6 +169,7 @@ class PlanModel(TypedDict, total=False):
     superseded: dict[str, SupersededEntry]
     promoted_ids: list[str]  # IDs user explicitly positioned via move_items()
     plan_start_scores: PlanStartScores
+    previous_plan_start_scores: PlanStartScores
     refresh_state: RefreshState
     execution_log: list[ExecutionLogEntry]
     epic_triage_meta: EpicTriageMeta

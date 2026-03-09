@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from pathlib import Path
 
 from desloppify.base.discovery.paths import get_project_root
@@ -10,7 +11,12 @@ from desloppify.engine.plan import TriageInput, build_triage_prompt
 
 from ..services import TriageServices, default_triage_services
 from .stage_prompts_instruction_blocks import _STAGE_INSTRUCTIONS
-from .stage_prompts_instruction_shared import _CLI_REFERENCE, _PREAMBLE, _STAGES
+from .stage_prompts_instruction_shared import (
+    _STAGES,
+    PromptMode,
+    render_cli_reference,
+    triage_prompt_preamble,
+)
 from .stage_prompts_observe import (
     _observe_batch_instructions,
     build_observe_batch_prompt,
@@ -22,36 +28,96 @@ from .stage_prompts_sense import (
 from .stage_prompts_validation import _validation_requirements
 
 
+def _compact_issue_summary(triage_input: TriageInput) -> str:
+    """Return a compact issue summary for later triage stages."""
+    by_dim: Counter[str] = Counter()
+    for issue in triage_input.open_issues.values():
+        detail = issue.get("detail", {}) if isinstance(issue.get("detail"), dict) else {}
+        by_dim[str(detail.get("dimension", "unknown"))] += 1
+    dims = ", ".join(f"{name} ({count})" for name, count in sorted(by_dim.items()))
+    parts = [
+        "## Issue Summary",
+        f"Open review issues: {len(triage_input.open_issues)}",
+    ]
+    if dims:
+        parts.append(f"Open dimensions: {dims}")
+    if triage_input.new_since_last:
+        parts.append(f"New since last triage: {len(triage_input.new_since_last)}")
+    if triage_input.resolved_since_last:
+        parts.append(f"Resolved since last triage: {len(triage_input.resolved_since_last)}")
+    return "\n".join(parts)
+
+
+def _issue_context_for_stage(stage: str, triage_input: TriageInput) -> str:
+    """Return the amount of issue context appropriate for a stage."""
+    if stage in {"observe", "reflect"}:
+        parts = ["## Issue Data\n\n" + build_triage_prompt(triage_input)]
+        if stage == "reflect":
+            short_ids = sorted(
+                issue_id.rsplit("::", 1)[-1]
+                for issue_id in triage_input.open_issues
+            )
+            parts.append(
+                "## Required Issue Hashes\n"
+                f"Total open review issues: {len(short_ids)}\n"
+                "Every one of these hashes must appear exactly once in your cluster/skip blueprint.\n"
+                "Do not repeat hashes outside that blueprint.\n"
+                + ", ".join(short_ids)
+            )
+        return "\n\n".join(parts)
+    return _compact_issue_summary(triage_input)
+
+
+def _relevant_prior_reports(stage: str, prior_reports: dict[str, str]) -> list[tuple[str, str]]:
+    """Return the stage reports that matter for the current stage."""
+    wanted = {
+        "reflect": ("observe",),
+        "organize": ("reflect",),
+        "enrich": ("organize",),
+        "sense-check": ("organize", "enrich"),
+    }.get(stage, tuple(prior_reports))
+    return [(name, prior_reports[name]) for name in wanted if name in prior_reports]
+
+
 def build_stage_prompt(
     stage: str,
     triage_input: TriageInput,
     prior_reports: dict[str, str],
     *,
     repo_root: Path,
+    mode: PromptMode = "self_record",
+    cli_command: str = "desloppify",
 ) -> str:
     """Build a complete subagent prompt for a triage stage."""
     parts: list[str] = []
 
     # Preamble
-    parts.append(_PREAMBLE.format(stage=stage.upper(), repo_root=repo_root))
-
-    # Issue data
-    issue_data = build_triage_prompt(triage_input)
-    parts.append("## Issue Data\n\n" + issue_data)
+    parts.append(
+        triage_prompt_preamble(mode).format(
+            stage=stage.upper(),
+            repo_root=repo_root,
+            cli_command=cli_command,
+        )
+    )
 
     # Prior stage reports
-    if prior_reports:
+    relevant_prior_reports = _relevant_prior_reports(stage, prior_reports)
+    if relevant_prior_reports:
         parts.append("## Prior Stage Reports\n")
-        for prior_stage, report in prior_reports.items():
+        for prior_stage, report in relevant_prior_reports:
             parts.append(f"### {prior_stage.upper()} Report\n{report}\n")
+
+    # Issue data / summary
+    parts.append(_issue_context_for_stage(stage, triage_input))
 
     # Stage-specific instructions
     instruction_fn = _STAGE_INSTRUCTIONS.get(stage)
     if instruction_fn:
-        parts.append(instruction_fn())
+        parts.append(instruction_fn(mode))
 
     # CLI reference
-    parts.append(_CLI_REFERENCE)
+    if mode == "self_record":
+        parts.append(render_cli_reference(cli_command))
 
     # Validation requirements
     parts.append(_validation_requirements(stage))

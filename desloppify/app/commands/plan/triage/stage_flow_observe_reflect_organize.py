@@ -26,6 +26,7 @@ from ._stage_validation import (
     _require_reflect_stage_for_organize,
     _unclustered_review_issues_or_error,
     _validate_recurring_dimension_mentions,
+    _validate_reflect_issue_accounting,
 )
 from .display import print_organize_result, print_reflect_result
 from .helpers import (
@@ -204,13 +205,23 @@ def _cmd_stage_reflect(
     ):
         return
 
+    valid_ids = set(si.open_issues.keys())
+    accounting_ok, cited_ids, missing_ids, duplicate_ids = _validate_reflect_issue_accounting(
+        report=report,
+        valid_ids=valid_ids,
+    )
+    if not accounting_ok:
+        return
+
     stages = meta.setdefault("triage_stages", {})
     reflect_stage = {
         "stage": "reflect",
         "report": report,
-        "cited_ids": [],
+        "cited_ids": sorted(cited_ids),
         "timestamp": utc_now(),
         "issue_count": issue_count,
+        "missing_issue_ids": missing_ids,
+        "duplicate_issue_ids": duplicate_ids,
     }
     reflect_stage["recurring_dims"] = recurring_dims
     stages["reflect"] = reflect_stage

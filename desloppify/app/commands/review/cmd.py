@@ -14,6 +14,7 @@ from desloppify.base.exception_sets import CommandError
 from .batch.orchestrator import do_import_run, do_run_batches
 from .external import do_external_start, do_external_submit
 from .importing.cmd import do_import, do_validate_import
+from .importing.flags import ReviewImportConfig
 from .merge import do_merge
 from .preflight import review_rerun_preflight
 from .prepare import do_prepare
@@ -183,10 +184,12 @@ def _run_review_mode(
         do_validate_import(
             opts.validate_import_file,
             lang,
-            allow_partial=opts.allow_partial,
-            manual_override=opts.manual_override,
-            attested_external=opts.attested_external,
-            manual_attest=opts.attest,
+            import_config=ReviewImportConfig(
+                allow_partial=opts.allow_partial,
+                manual_override=opts.manual_override,
+                attested_external=opts.attested_external,
+                manual_attest=opts.attest,
+            ),
         )
         return
 
@@ -196,11 +199,13 @@ def _run_review_mode(
             state,
             lang,
             state_file,
-            config=runtime.config,
-            allow_partial=opts.allow_partial,
-            manual_override=opts.manual_override,
-            attested_external=opts.attested_external,
-            manual_attest=opts.attest,
+            import_config=ReviewImportConfig(
+                config=runtime.config,
+                allow_partial=opts.allow_partial,
+                manual_override=opts.manual_override,
+                attested_external=opts.attested_external,
+                manual_attest=opts.attest,
+            ),
             dry_run=opts.dry_run,
         )
         return

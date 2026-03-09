@@ -177,6 +177,7 @@ from desloppify.engine._plan.sync_triage import (
 
 # --- sync: workflow ---------------------------------------------------------
 from desloppify.engine._plan.sync_workflow import (
+    ScoreSnapshot,
     sync_communicate_score_needed,
     sync_create_plan_needed,
     sync_import_scores_needed,

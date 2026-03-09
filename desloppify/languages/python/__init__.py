@@ -118,7 +118,7 @@ class PythonConfig(LangConfig):
             boundaries=[],
             typecheck_cmd="",
             file_finder=find_py_files,
-            large_threshold=300,
+            large_threshold=500,
             complexity_threshold=25,
             default_scan_profile="full",
             detect_markers=["pyproject.toml", "setup.py", "setup.cfg"],

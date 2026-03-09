@@ -167,8 +167,9 @@ def test_external_submit_canonicalizes_and_imports(tmp_path, monkeypatch):
     assert payload["provenance"]["runner"] == "claude"
     assert payload["provenance"]["packet_sha256"] == session_payload["packet_sha256"]
     kwargs = captured["kwargs"]
-    assert kwargs["attested_external"] is True
-    assert kwargs["manual_attest"] == external_mod.EXTERNAL_ATTEST_TEXT
+    ic = kwargs["import_config"]
+    assert ic.attested_external is True
+    assert ic.manual_attest == external_mod.EXTERNAL_ATTEST_TEXT
 
     persisted = json.loads(session_path.read_text())
     assert persisted["status"] == "submitted"

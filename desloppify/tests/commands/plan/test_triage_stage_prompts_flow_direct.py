@@ -86,7 +86,11 @@ def test_observe_and_sense_prompt_builders_include_expected_context(tmp_path) ->
     )
     assert "cluster `cluster-a`" in content_prompt
     assert "Current Steps" in content_prompt
+    assert "Do NOT run any `desloppify` commands" in content_prompt
+    assert "The orchestrator will apply the updates." in content_prompt
     assert "cross-cluster dependencies" in structure_prompt
+    assert "Do NOT run any `desloppify` commands" in structure_prompt
+    assert "desloppify plan cluster update" not in structure_prompt
 
 
 def test_run_stage_enrich_handles_no_queue_and_records_stage(tmp_path, capsys) -> None:

@@ -73,11 +73,14 @@ def _serialize_issue_item_base(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _add_workflow_state(
-    serialized: dict[str, Any],
-    item: Mapping[str, Any],
-) -> None:
-    """Attach workflow and explanation metadata."""
+def serialize_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Build a serializable output dict from a queue item."""
+    if item.get("kind") == "cluster":
+        return _serialize_cluster_item(item)
+
+    serialized = _serialize_issue_item_base(item)
+
+    # Workflow state
     blocked_by = item.get("blocked_by")
     if blocked_by:
         serialized["blocked_by"] = blocked_by
@@ -87,17 +90,11 @@ def _add_workflow_state(
     if explain is not None:
         serialized["explain"] = explain
 
-
-def _add_plan_metadata(
-    serialized: dict[str, Any],
-    item: Mapping[str, Any],
-) -> None:
-    """Attach queue and plan metadata fields when present."""
+    # Plan metadata
     for key in ("queue_position", "plan_description", "plan_note", "plan_cluster"):
         value = item.get(key)
         if value:
             serialized[key] = value
-
     if item.get("plan_skipped"):
         serialized["plan_skipped"] = True
         serialized["plan_skip_kind"] = item.get("plan_skip_kind", "temporary")
@@ -105,15 +102,6 @@ def _add_plan_metadata(
         if skip_reason:
             serialized["plan_skip_reason"] = skip_reason
 
-
-def serialize_item(item: Mapping[str, Any]) -> dict[str, Any]:
-    """Build a serializable output dict from a queue item."""
-    if item.get("kind") == "cluster":
-        return _serialize_cluster_item(item)
-
-    serialized = _serialize_issue_item_base(item)
-    _add_workflow_state(serialized, item)
-    _add_plan_metadata(serialized, item)
     return serialized
 
 

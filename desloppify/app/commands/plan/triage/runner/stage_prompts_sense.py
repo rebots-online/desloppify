@@ -63,9 +63,10 @@ def build_sense_check_content_prompt(
         parts.append(policy_block)
 
     parts.append(
-        "## How to fix\n"
-        f"desloppify plan cluster update {cluster_name} "
-        "--update-step N --detail \"corrected...\" --effort <tag>\n"
+        "## How to report fixes\n"
+        "Describe the exact step corrections needed, including the corrected detail text,\n"
+        "the effort tag, and any stale/duplicate/over-engineered steps that should be removed.\n"
+        "The orchestrator will apply the updates.\n"
     )
 
     parts.append(
@@ -73,7 +74,8 @@ def build_sense_check_content_prompt(
         "- Do NOT reorder steps (the structure subagent handles that)\n"
         "- Do NOT add --depends-on (the structure subagent handles that)\n"
         "- Do NOT add new steps for missing cascade updates (the structure subagent handles that)\n"
-        "- Do NOT run any other desloppify commands\n"
+        "- Do NOT run any `desloppify` commands\n"
+        "- Do NOT debug or repair the CLI / environment\n"
     )
 
     # Include cluster steps
@@ -123,14 +125,11 @@ def build_sense_check_structure_prompt(
     parts.append(
         "## What to check and fix\n"
         "1. SHARED FILES: If cluster A and cluster B both have steps touching the same file,\n"
-        "   and neither depends on the other → add a dependency.\n"
-        "   Fix: desloppify plan cluster update {later_cluster} --depends-on {earlier_cluster}\n"
+        "   and neither depends on the other → report which dependency edge should be added.\n"
         "2. MISSING CASCADE: If a step renames/removes a function or export, check whether\n"
         "   any other file imports it. If those importers aren't covered by any step in any\n"
-        "   cluster → add a cascade step.\n"
-        "   Fix: desloppify plan cluster update {cluster} --add-step \"Update importers of {name}\"\n"
-        "        --detail \"Files importing {old}: {list}. Update import to {new}.\"\n"
-        "        --effort trivial --issue-refs {hash}\n"
+        "   cluster → report the cascade step that should be added.\n"
+        "   Include the cluster name, affected importers, and issue hash in your report.\n"
         "3. CIRCULAR DEPS: If adding a dependency would create a cycle, flag it in your report\n"
         "   instead of adding it.\n"
     )
@@ -140,7 +139,8 @@ def build_sense_check_structure_prompt(
         "- Do NOT modify step detail text (the content subagent handles that)\n"
         "- Do NOT change effort tags (the content subagent handles that)\n"
         "- Do NOT remove steps or deduplicate (the content subagent handles that)\n"
-        "- Do NOT run any other desloppify commands besides cluster update --depends-on and --add-step\n"
+        "- Do NOT run any `desloppify` commands\n"
+        "- Do NOT debug or repair the CLI / environment\n"
     )
 
     # Include all clusters with their steps and dependencies

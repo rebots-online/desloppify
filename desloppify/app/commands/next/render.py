@@ -74,13 +74,11 @@ def _render_subjective_dimension(item: dict, *, explain: bool) -> None:
         print(colorize(f"  explain: {reason}", "dim"))
 
 
-def _render_plan_item_context(
-    item: dict,
-    *,
-    single_item: bool,
-    header_showed_plan: bool,
-) -> None:
-    """Render plan metadata context attached to an item."""
+def _render_issue_detail(
+    item: dict, *, single_item: bool = False, header_showed_plan: bool = False,
+) -> dict:
+    """Render plan overrides, file info, and detail fields. Returns parsed detail dict."""
+    # Plan context
     plan_description = item.get("plan_description")
     if plan_description:
         print(colorize(f"  → {plan_description}", "cyan"))
@@ -103,9 +101,14 @@ def _render_plan_item_context(
     if plan_note:
         print(colorize(f"  Note: {plan_note}", "dim"))
 
+    # File and ID
+    file_val = item.get("file", "")
+    if file_val and file_val != ".":
+        print(f"  File: {file_val}")
+    print(colorize(f"  ID:   {item.get('id', '')}", "dim"))
 
-def _normalize_issue_detail(raw_detail: object) -> dict:
-    """Normalize issue detail payload to a dict with expected defaults."""
+    # Normalize detail
+    raw_detail = item.get("detail", {})
     if isinstance(raw_detail, str):
         raw_detail = {"suggestion": raw_detail}
     detail = dict(raw_detail) if isinstance(raw_detail, dict) else {}
@@ -114,11 +117,8 @@ def _normalize_issue_detail(raw_detail: object) -> dict:
     detail.setdefault("category", None)
     detail.setdefault("importers", None)
     detail.setdefault("count", 0)
-    return detail
 
-
-def _render_issue_detail_fields(detail: dict) -> None:
-    """Render optional detail fields for the issue card."""
+    # Detail fields
     lines = detail.get("lines")
     if lines:
         print(f"  Lines: {', '.join(str(line_no) for line_no in lines[:8])}")
@@ -132,38 +132,14 @@ def _render_issue_detail_fields(detail: dict) -> None:
     if suggestion:
         print(colorize(f"\n  Suggestion: {suggestion}", "dim"))
 
-
-def _render_issue_code_snippet(item: dict, detail: dict) -> None:
-    """Render contextual code snippet around the primary issue line."""
+    # Code snippet
     target_line = detail.get("line") or (detail.get("lines", [None]) or [None])[0]
     file_path = item.get("file")
-    if not target_line or file_path in (".", ""):
-        return
-    snippet = read_code_snippet(file_path, target_line)
-    if not snippet:
-        return
-    print(colorize("\n  Code:", "dim"))
-    print(snippet)
-
-
-def _render_issue_detail(
-    item: dict, *, single_item: bool = False, header_showed_plan: bool = False,
-) -> dict:
-    """Render plan overrides, file info, and detail fields. Returns parsed detail dict."""
-    _render_plan_item_context(
-        item,
-        single_item=single_item,
-        header_showed_plan=header_showed_plan,
-    )
-
-    file_val = item.get("file", "")
-    if file_val and file_val != ".":
-        print(f"  File: {file_val}")
-    print(colorize(f"  ID:   {item.get('id', '')}", "dim"))
-
-    detail = _normalize_issue_detail(item.get("detail", {}))
-    _render_issue_detail_fields(detail)
-    _render_issue_code_snippet(item, detail)
+    if target_line and file_path not in (".", ""):
+        snippet = read_code_snippet(file_path, target_line)
+        if snippet:
+            print(colorize("\n  Code:", "dim"))
+            print(snippet)
 
     return detail
 
@@ -233,42 +209,28 @@ def _render_item_explain(
     )
 
 
-def _render_special_item(
-    item: dict,
-    *,
-    explain: bool,
-) -> bool:
-    """Render kind-specific items that bypass the standard issue card."""
-    kind = item.get("kind")
-    kind_renderer = _KIND_RENDERERS.get(kind)
-    if kind_renderer is not None:
-        kind_renderer(item)
-        return True
-    if item.get("kind", "issue") == "subjective_dimension":
-        _render_subjective_dimension(item, explain=explain)
-        return True
-    return False
-
-
-def _render_standard_issue_header(item: dict, confidence: str) -> None:
-    """Render the shared issue header before detail sections."""
-    print(colorize(f"  ({confidence} confidence)", "bold"))
-    print(colorize("  " + "─" * 60, "dim"))
-    print(f"  {colorize(item.get('summary', ''), 'yellow')}")
-    _render_item_type(item)
-
-
 def _render_item(
     item: dict, dim_scores: dict, issues_scoped: dict, explain: bool,
     potentials: dict | None = None,
     single_item: bool = False,
     header_showed_plan: bool = False,
 ) -> None:
-    if _render_special_item(item, explain=explain):
+    # Kind-specific items that bypass the standard issue card
+    kind = item.get("kind")
+    kind_renderer = _KIND_RENDERERS.get(kind)
+    if kind_renderer is not None:
+        kind_renderer(item)
+        return
+    if item.get("kind", "issue") == "subjective_dimension":
+        _render_subjective_dimension(item, explain=explain)
         return
 
+    # Standard issue header
     confidence = item.get("confidence", "medium")
-    _render_standard_issue_header(item, confidence)
+    print(colorize(f"  ({confidence} confidence)", "bold"))
+    print(colorize("  " + "─" * 60, "dim"))
+    print(f"  {colorize(item.get('summary', ''), 'yellow')}")
+    _render_item_type(item)
 
     detail = _render_issue_detail(
         item, single_item=single_item, header_showed_plan=header_showed_plan,

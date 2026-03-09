@@ -351,20 +351,6 @@ class TestSyncPlanStartScoresAndLog:
         assert changed is False
         assert plan["execution_log"] == []
 
-    def test_does_not_seed_when_only_postflight_work_remains(self, monkeypatch):
-        plan = empty_plan()
-        state = _make_state(
-            strict_score=85.0, overall_score=90.0,
-            objective_score=88.0, verified_strict_score=80.0,
-        )
-        monkeypatch.setattr(
-            "desloppify.app.commands.helpers.queue_progress.plan_aware_queue_breakdown",
-            lambda s, p: SimpleNamespace(objective_actionable=0, queue_total=1),
-        )
-        changed = reconcile_mod._sync_plan_start_scores_and_log(plan, state)
-        assert changed is False
-        assert plan["plan_start_scores"] == {}
-
     def test_clears_when_queue_empty(self, monkeypatch):
         plan = empty_plan()
         plan["plan_start_scores"] = {

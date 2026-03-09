@@ -123,33 +123,92 @@ def sync_import_scores_needed(
     return _inject(plan, WORKFLOW_IMPORT_SCORES_ID)
 
 
+class ScoreSnapshot:
+    """Minimal score snapshot for rebaseline — avoids importing state.py."""
+
+    __slots__ = ("strict", "overall", "objective", "verified")
+
+    def __init__(
+        self,
+        *,
+        strict: float | None,
+        overall: float | None,
+        objective: float | None,
+        verified: float | None,
+    ) -> None:
+        self.strict = strict
+        self.overall = overall
+        self.objective = objective
+        self.verified = verified
+
+
 def sync_communicate_score_needed(
     plan: PlanModel,
     state: StateModel,
     *,
     policy: SubjectiveVisibility | None = None,
     scores_just_imported: bool = False,
+    current_scores: ScoreSnapshot | None = None,
 ) -> QueueSyncResult:
-    """Inject ``workflow::communicate-score`` when scores should be shown.
+    """Inject ``workflow::communicate-score`` and rebaseline scores.
 
-    Injects when either:
-    - All initial subjective reviews are complete (no unscored dimensions), OR
-    - Scores were just imported (trusted/attested/override)
+    Injects when:
+    - All initial subjective reviews are complete (no unscored dims), OR
+      scores were just imported (trusted/attested/override)
+    - ``workflow::communicate-score`` is not already in the queue
+    - Score has not already been communicated this cycle
+      (``previous_plan_start_scores`` absent)
 
-    And ``workflow::communicate-score`` is not already in the queue.
-    Appended to back of queue.  Never reorders existing items.
+    When injected and *current_scores* is provided, ``plan_start_scores``
+    is rebaselined to the current score so the score display unfreezes at
+    the new value.  The previous baseline is preserved in
+    ``previous_plan_start_scores`` so the communicate-score queue item can
+    show the old → new delta — and so mid-cycle scans know not to
+    re-inject.
     """
     ensure_plan_defaults(plan)
     order: list[str] = plan["queue_order"]
 
-    if WORKFLOW_COMMUNICATE_SCORE_ID in order or WORKFLOW_SCORE_CHECKPOINT_ID in order:
+    if WORKFLOW_COMMUNICATE_SCORE_ID in order:
+        return _EMPTY()
+    # Already communicated this cycle — previous_plan_start_scores is set
+    # at injection time and cleared at cycle boundaries.
+    if "previous_plan_start_scores" in plan:
         return _EMPTY()
     if not scores_just_imported and not _no_unscored(state, policy):
         return _EMPTY()
+
+    if current_scores is not None:
+        _rebaseline_plan_start_scores(plan, current_scores)
+    # Set sentinel even when rebaseline was a no-op (no plan_start_scores
+    # to rebaseline) so mid-cycle scans don't re-inject.
+    if not plan.get("previous_plan_start_scores"):
+        plan["previous_plan_start_scores"] = {}
     return _inject(plan, WORKFLOW_COMMUNICATE_SCORE_ID)
 
 
+def _rebaseline_plan_start_scores(
+    plan: PlanModel,
+    scores: ScoreSnapshot,
+) -> None:
+    """Snapshot the current score as the new baseline, preserving the old one."""
+    old_start = plan.get("plan_start_scores")
+    if not isinstance(old_start, dict) or not old_start:
+        return
+    if scores.strict is None:
+        return
+
+    plan["previous_plan_start_scores"] = dict(old_start)
+    plan["plan_start_scores"] = {
+        "strict": scores.strict,
+        "overall": scores.overall,
+        "objective": scores.objective,
+        "verified": scores.verified,
+    }
+
+
 __all__ = [
+    "ScoreSnapshot",
     "sync_communicate_score_needed",
     "sync_create_plan_needed",
     "sync_import_scores_needed",

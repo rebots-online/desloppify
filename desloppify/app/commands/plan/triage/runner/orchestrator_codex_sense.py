@@ -7,7 +7,7 @@ from pathlib import Path
 
 from desloppify.base.discovery.file_paths import safe_write_text
 from desloppify.base.output.terminal import colorize
-from desloppify.engine._plan.project_policy import load_policy, render_policy_block
+from desloppify.engine.plan import load_policy, render_policy_block
 
 from ..helpers import manual_clusters_with_issues
 from .codex_runner import _output_file_has_text, run_triage_stage

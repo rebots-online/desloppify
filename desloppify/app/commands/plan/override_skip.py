@@ -22,7 +22,6 @@ from desloppify.app.commands.plan.override_io import (
 from desloppify.base.exception_sets import CommandError
 from desloppify.base.output.terminal import colorize
 from desloppify.base.output.user_message import print_user_message
-from desloppify.engine._work_queue.core import ATTEST_EXAMPLE
 from desloppify.engine.plan import (
     SKIP_KIND_LABELS,
     append_log_entry,
@@ -40,6 +39,11 @@ from desloppify.engine.plan import (
 logger = logging.getLogger(__name__)
 
 _BULK_SKIP_THRESHOLD = 5
+_TRIAGE_SKIP_ATTESTATION_PHRASES = ("reviewed", "not gaming")
+_TRIAGE_SKIP_ATTEST_EXAMPLE = (
+    "I have reviewed this triage skip against the code and I am not gaming "
+    "the score by suppressing a real defect."
+)
 
 
 def _validate_skip_requirements(
@@ -50,11 +54,15 @@ def _validate_skip_requirements(
 ) -> bool:
     if not skip_kind_requires_attestation(kind):
         return True
-    if not validate_attestation(attestation):
+    if not validate_attestation(
+        attestation,
+        required_phrases=_TRIAGE_SKIP_ATTESTATION_PHRASES,
+    ):
         show_attestation_requirement(
             "Permanent skip" if kind == "permanent" else "False positive",
             attestation,
-            ATTEST_EXAMPLE,
+            _TRIAGE_SKIP_ATTEST_EXAMPLE,
+            required_phrases=_TRIAGE_SKIP_ATTESTATION_PHRASES,
         )
         return False
     if skip_kind_requires_note(kind) and not note:
@@ -146,7 +154,10 @@ def cmd_plan_skip(args: argparse.Namespace) -> None:
             print()
             return
     if not _validate_skip_requirements(kind=kind, attestation=attestation, note=note):
-        return
+        raise CommandError(
+            "Invalid plan skip attestation or note.",
+            exit_code=2,
+        )
 
     state_file = runtime.state_path
     plan_file = _plan_file_for_state(state_file)

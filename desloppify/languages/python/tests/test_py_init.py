@@ -66,7 +66,7 @@ class TestPythonConfig:
 
     def test_large_threshold(self):
         config = PythonConfig()
-        assert config.large_threshold == 300
+        assert config.large_threshold == 500
 
     def test_complexity_threshold(self):
         config = PythonConfig()

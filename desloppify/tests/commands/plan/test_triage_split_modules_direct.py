@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,6 +21,7 @@ import desloppify.app.commands.plan.triage.runner.orchestrator_codex_observe as 
 import desloppify.app.commands.plan.triage.runner.orchestrator_codex_pipeline as orchestrator_pipeline_mod
 import desloppify.app.commands.plan.triage.runner.orchestrator_codex_sense as orchestrator_sense_mod
 import desloppify.app.commands.plan.triage.runner.orchestrator_common as orchestrator_common_mod
+from desloppify.base.exception_sets import CommandError
 
 
 def test_completion_policy_helpers_cover_success_and_fail_paths(monkeypatch, capsys) -> None:
@@ -401,3 +403,202 @@ def test_orchestrator_pipeline_summary_writer_includes_finalization_fields(tmp_p
 
 def test_orchestrator_pipeline_entrypoint_is_exposed() -> None:
     assert callable(orchestrator_pipeline_mod.run_codex_pipeline)
+
+
+def test_orchestrator_pipeline_writes_exact_cli_helper(tmp_path: Path) -> None:
+    helper = orchestrator_pipeline_mod._write_desloppify_cli_helper(tmp_path)
+    text = helper.read_text(encoding="utf-8")
+    assert helper.exists()
+    assert helper.stat().st_mode & 0o111
+    assert "PYTHONPATH=" in text
+    assert "-m desloppify.cli" in text
+
+
+def test_load_prior_reports_from_plan_uses_existing_stage_reports() -> None:
+    plan = {
+        "epic_triage_meta": {
+            "triage_stages": {
+                "observe": {"report": "observe report"},
+                "reflect": {"report": "reflect report"},
+                "organize": {"report": ""},
+            }
+        }
+    }
+
+    prior = orchestrator_pipeline_mod._load_prior_reports_from_plan(plan)
+    assert prior == {
+        "observe": "observe report",
+        "reflect": "reflect report",
+    }
+
+
+def test_execute_stage_records_output_only_reflect_report(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+    for dirname in ("prompts", "output", "logs"):
+        (tmp_path / dirname).mkdir()
+
+    monkeypatch.setattr(orchestrator_pipeline_mod, "build_stage_prompt", lambda *args, **kwargs: "prompt")
+
+    def fake_run_triage_stage(*, prompt, repo_root, output_file, log_file, timeout_seconds):
+        del prompt, repo_root, log_file, timeout_seconds
+        output_file.write_text("Reflect analysis report with enough detail.", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(
+        "desloppify.app.commands.plan.triage.runner.codex_runner.run_triage_stage",
+        fake_run_triage_stage,
+    )
+    monkeypatch.setitem(
+        orchestrator_pipeline_mod._STAGE_HANDLERS,
+        "reflect",
+        orchestrator_pipeline_mod.StageHandler(
+            record_report=lambda report, _args, _services: captured.setdefault("report", report),
+            prompt_mode="output_only",
+        ),
+    )
+
+    status, result = orchestrator_pipeline_mod._execute_stage(
+        stage="reflect",
+        args=argparse.Namespace(state=None),
+        services=SimpleNamespace(),
+        plan={},
+        si={},
+        prior_reports={},
+        repo_root=tmp_path,
+        prompts_dir=tmp_path / "prompts",
+        output_dir=tmp_path / "output",
+        logs_dir=tmp_path / "logs",
+        cli_command="/tmp/run_desloppify.sh",
+        stage_start=time.monotonic(),
+        timeout_seconds=60,
+        dry_run=False,
+        append_run_log=lambda _line: None,
+    )
+
+    assert status == "ready"
+    assert result == {}
+    assert captured["report"] == "Reflect analysis report with enough detail."
+
+
+def test_execute_stage_uses_self_record_mode_for_organize(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+    for dirname in ("prompts", "output", "logs"):
+        (tmp_path / dirname).mkdir()
+
+    def fake_build_stage_prompt(stage, triage_input, prior_reports, *, repo_root, mode, cli_command):
+        del triage_input, prior_reports, repo_root
+        captured["stage"] = stage
+        captured["mode"] = mode
+        captured["cli_command"] = cli_command
+        return "prompt"
+
+    def fake_run_triage_stage(*, prompt, repo_root, output_file, log_file, timeout_seconds):
+        del prompt, repo_root, log_file, timeout_seconds
+        output_file.write_text("Organize summary.", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(orchestrator_pipeline_mod, "build_stage_prompt", fake_build_stage_prompt)
+    monkeypatch.setattr(
+        "desloppify.app.commands.plan.triage.runner.codex_runner.run_triage_stage",
+        fake_run_triage_stage,
+    )
+
+    status, result = orchestrator_pipeline_mod._execute_stage(
+        stage="organize",
+        args=argparse.Namespace(state=None),
+        services=SimpleNamespace(),
+        plan={},
+        si={},
+        prior_reports={"reflect": "report"},
+        repo_root=tmp_path,
+        prompts_dir=tmp_path / "prompts",
+        output_dir=tmp_path / "output",
+        logs_dir=tmp_path / "logs",
+        cli_command="/tmp/run_desloppify.sh",
+        stage_start=time.monotonic(),
+        timeout_seconds=60,
+        dry_run=False,
+        append_run_log=lambda _line: None,
+    )
+
+    assert status == "ready"
+    assert result == {}
+    assert captured["stage"] == "organize"
+    assert captured["mode"] == "self_record"
+    assert captured["cli_command"] == "/tmp/run_desloppify.sh"
+
+
+def test_execute_stage_blocks_organize_when_reflect_accounting_is_invalid(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    for dirname in ("prompts", "output", "logs"):
+        (tmp_path / dirname).mkdir()
+
+    monkeypatch.setattr(
+        orchestrator_pipeline_mod,
+        "_validate_reflect_issue_accounting",
+        lambda **_kwargs: (False, set(), ["review::x::deadbeef"], []),
+    )
+
+    status, result = orchestrator_pipeline_mod._execute_stage(
+        stage="organize",
+        args=argparse.Namespace(state=None),
+        services=SimpleNamespace(),
+        plan={
+            "epic_triage_meta": {
+                "triage_stages": {"reflect": {"report": "bad reflect blueprint"}}
+            }
+        },
+        si=SimpleNamespace(open_issues={"review::x::deadbeef": {}}),
+        prior_reports={"reflect": "bad reflect blueprint"},
+        repo_root=tmp_path,
+        prompts_dir=tmp_path / "prompts",
+        output_dir=tmp_path / "output",
+        logs_dir=tmp_path / "logs",
+        cli_command="/tmp/run_desloppify.sh",
+        stage_start=time.monotonic(),
+        timeout_seconds=60,
+        dry_run=False,
+        append_run_log=lambda _line: None,
+    )
+
+    assert status == "failed"
+    assert result["error"].startswith("reflect_accounting_invalid")
+
+
+def test_run_codex_pipeline_raises_on_stage_failure(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(orchestrator_pipeline_mod, "get_project_root", lambda: tmp_path)
+    monkeypatch.setattr(orchestrator_pipeline_mod, "run_stamp", lambda: "20260309_151500")
+    monkeypatch.setattr(
+        orchestrator_pipeline_mod,
+        "_write_desloppify_cli_helper",
+        lambda run_dir: run_dir / "run_desloppify.sh",
+    )
+    monkeypatch.setattr(
+        orchestrator_pipeline_mod,
+        "_execute_stage",
+        lambda **_kwargs: ("failed", {"status": "failed", "error": "boom"}),
+    )
+
+    services = SimpleNamespace(
+        load_plan=lambda: {"epic_triage_meta": {"triage_stages": {}}},
+        command_runtime=lambda _args: SimpleNamespace(state={}),
+        collect_triage_input=lambda _plan, _state: SimpleNamespace(open_issues={}, resolved_issues={}),
+    )
+    monkeypatch.setattr(
+        orchestrator_pipeline_mod,
+        "default_triage_services",
+        lambda: services,
+    )
+    monkeypatch.setattr(orchestrator_pipeline_mod, "ensure_triage_started", lambda *_a, **_k: None)
+
+    with pytest.raises(CommandError) as excinfo:
+        orchestrator_pipeline_mod.run_codex_pipeline(
+            argparse.Namespace(stage_timeout_seconds=30, dry_run=False, state=None),
+            stages_to_run=["organize"],
+            services=services,
+        )
+
+    assert excinfo.value.exit_code == 1
+    assert "triage stage failed: organize" in excinfo.value.message

@@ -14,7 +14,13 @@ def _args(**overrides) -> argparse.Namespace:
     return argparse.Namespace(**base)
 
 
-def _services(plan: dict, *, state: dict | None = None):
+def _services(
+    plan: dict,
+    *,
+    state: dict | None = None,
+    open_issues: dict | None = None,
+    resolved_issues: dict | None = None,
+):
     saved: list[dict] = []
     logs: list[tuple[str, dict]] = []
     state_obj = state or {}
@@ -23,8 +29,8 @@ def _services(plan: dict, *, state: dict | None = None):
         load_plan=lambda: plan,
         save_plan=lambda current: saved.append(current.copy()),
         collect_triage_input=lambda _plan, _state: SimpleNamespace(
-            open_issues={},
-            resolved_issues={},
+            open_issues=open_issues or {},
+            resolved_issues=resolved_issues or {},
         ),
         extract_issue_citations=lambda _report, _valid_ids: set(),
         append_log_entry=lambda _plan, action, **kwargs: logs.append((action, kwargs)),
@@ -97,3 +103,36 @@ def test_public_wrappers_delegate_to_private(monkeypatch) -> None:
     flow_mod.cmd_stage_organize(args)
 
     assert called == ["observe", "reflect", "organize"]
+
+
+def test_reflect_rejects_incomplete_issue_accounting(monkeypatch, capsys) -> None:
+    plan = {
+        "epic_triage_meta": {
+            "triage_stages": {
+                "observe": {
+                    "report": "x" * 120,
+                    "confirmed_at": "2026-03-09T00:00:00Z",
+                }
+            }
+        }
+    }
+    open_issues = {
+        "review::design::aaaabbbb": {"status": "open"},
+        "review::design::ccccdddd": {"status": "open"},
+    }
+    services, _saved, _logs = _services(plan, open_issues=open_issues)
+    monkeypatch.setattr(flow_mod, "has_triage_in_queue", lambda _plan: True)
+
+    flow_mod._cmd_stage_reflect(
+        _args(
+            report=(
+                "Cluster alpha will handle aaaabbbb in src/a.ts after reviewing the current "
+                "resolved history and recurring dimensions. " * 2
+            )
+        ),
+        services=services,
+    )
+
+    out = capsys.readouterr().out
+    assert "account for every open review issue exactly once" in out
+    assert "reflect" not in plan["epic_triage_meta"]["triage_stages"]

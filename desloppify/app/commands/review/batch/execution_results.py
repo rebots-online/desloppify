@@ -7,6 +7,8 @@ from pathlib import Path
 
 from desloppify.base.exception_sets import CommandError
 
+from ..importing.flags import ReviewImportConfig
+
 from .scope import (
     collect_reviewed_files_from_batches,
     enforce_trusted_import_coverage_gate,
@@ -188,10 +190,12 @@ def import_and_finalize(
             state,
             lang,
             state_file,
-            config=config,
-            allow_partial=allow_partial,
-            trusted_assessment_source=True,
-            trusted_assessment_label="trusted internal run-batches import",
+            import_config=ReviewImportConfig(
+                config=config,
+                allow_partial=allow_partial,
+                trusted_assessment_source=True,
+                trusted_assessment_label="trusted internal run-batches import",
+            ),
         )
     except SystemExit as exc:
         append_run_log(f"run-finished import-failed code={exc.code}")

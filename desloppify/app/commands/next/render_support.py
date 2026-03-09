@@ -131,38 +131,6 @@ def _step_display_text(step: str | dict) -> str:
     return str(step)
 
 
-def _render_cluster_action_steps(action_steps: list[dict | str]) -> None:
-    """Render the first few action steps for a cluster item."""
-    if not action_steps:
-        return
-    show_count = min(3, len(action_steps))
-    for i, step in enumerate(action_steps[:show_count], 1):
-        marker = "[x]" if isinstance(step, dict) and step.get("done") else "[ ]"
-        print(colorize(f"    {i}. {marker} {_step_display_text(step)}", "dim"))
-    remaining = len(action_steps) - show_count
-    if remaining > 0:
-        print(colorize(f"    ... and {remaining} more — drill in to view all", "dim"))
-
-
-def _render_cluster_members(members: list[dict]) -> None:
-    """Render cluster file spread and sample issue summaries."""
-    if not members:
-        return
-    _render_cluster_files(members)
-    _render_cluster_sample(members)
-
-
-def _render_cluster_primary_action(item: dict) -> None:
-    """Render optional autofix hint and primary action command."""
-    autofix_hint = item.get("autofix_hint")
-    primary_command = item.get("primary_command")
-    if autofix_hint:
-        print(colorize(f"\n  Try auto first: {autofix_hint}", "cyan"))
-        print(colorize("  If auto finds 0, drill into individual issues:", "dim"))
-    if primary_command:
-        print(colorize(f"  Action: {primary_command}", "cyan"))
-
-
 def render_cluster_item(item: dict) -> None:
     """Render an auto-cluster task card."""
     member_count = int(item.get("member_count", 0))
@@ -178,15 +146,34 @@ def render_cluster_item(item: dict) -> None:
     print(colorize("  " + "─" * 60, "dim"))
     print(f"  {colorize(item.get('summary', ''), 'yellow')}")
 
-    _render_cluster_action_steps(action_steps)
+    # Action steps
+    if action_steps:
+        show_count = min(3, len(action_steps))
+        for i, step in enumerate(action_steps[:show_count], 1):
+            marker = "[x]" if isinstance(step, dict) and step.get("done") else "[ ]"
+            print(colorize(f"    {i}. {marker} {_step_display_text(step)}", "dim"))
+        remaining = len(action_steps) - show_count
+        if remaining > 0:
+            print(colorize(f"    ... and {remaining} more — drill in to view all", "dim"))
 
     dep_order = item.get("dependency_order")
     if dep_order is not None and dep_order <= 2:
         print(colorize("  Priority: complete before other clusters", "cyan"))
 
-    _render_cluster_members(item.get("members", []))
+    # Cluster members
+    members = item.get("members", [])
+    if members:
+        _render_cluster_files(members)
+        _render_cluster_sample(members)
 
-    _render_cluster_primary_action(item)
+    # Primary action
+    autofix_hint = item.get("autofix_hint")
+    primary_command = item.get("primary_command")
+    if autofix_hint:
+        print(colorize(f"\n  Try auto first: {autofix_hint}", "cyan"))
+        print(colorize("  If auto finds 0, drill into individual issues:", "dim"))
+    if primary_command:
+        print(colorize(f"  Action: {primary_command}", "cyan"))
 
     if is_optional:
         _render_optional_cluster_commands(cluster_name)

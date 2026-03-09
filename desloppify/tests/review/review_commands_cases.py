@@ -26,6 +26,7 @@ from desloppify.app.commands.review.importing.cmd import do_import as _do_import
 from desloppify.app.commands.review.importing.cmd import (
     do_validate_import as _do_validate_import,
 )
+from desloppify.app.commands.review.importing.flags import ReviewImportConfig
 from desloppify.app.commands.review.prepare import do_prepare as _do_prepare
 from desloppify.app.commands.review.runtime.setup import setup_lang_concrete as _setup_lang
 from desloppify.base.exception_sets import CommandError
@@ -324,8 +325,10 @@ class TestCmdReviewPrepare:
                 empty_state,
                 lang,
                 "fake_sp",
-                manual_override=True,
-                manual_attest="Manual calibration approved",
+                import_config=ReviewImportConfig(
+                    manual_override=True,
+                    manual_attest="Manual calibration approved",
+                ),
             )
 
         assert saved["sp"] == "fake_sp"
@@ -367,9 +370,11 @@ class TestCmdReviewPrepare:
                 empty_state,
                 lang,
                 tmp_path / "state.json",
-                allow_partial=True,
-                manual_override=True,
-                manual_attest="operator note",
+                import_config=ReviewImportConfig(
+                    allow_partial=True,
+                    manual_override=True,
+                    manual_attest="operator note",
+                ),
             )
 
     def test_trusted_internal_import_clears_provisional_flags(self, empty_state, tmp_path):
@@ -401,8 +406,10 @@ class TestCmdReviewPrepare:
             empty_state,
             lang,
             tmp_path / "state.json",
-            trusted_assessment_source=True,
-            trusted_assessment_label="test trusted internal",
+            import_config=ReviewImportConfig(
+                trusted_assessment_source=True,
+                trusted_assessment_label="test trusted internal",
+            ),
         )
 
         saved = empty_state["subjective_assessments"]["naming_quality"]
@@ -465,8 +472,10 @@ class TestCmdReviewPrepare:
             stale_state,
             lang,
             state_file,
-            trusted_assessment_source=True,
-            trusted_assessment_label="trusted-rebase-test",
+            import_config=ReviewImportConfig(
+                trusted_assessment_source=True,
+                trusted_assessment_label="trusted-rebase-test",
+            ),
         )
 
         assessments = stale_state["subjective_assessments"]
@@ -511,10 +520,12 @@ class TestCmdReviewPrepare:
             empty_state,
             lang,
             tmp_path / "state.json",
-            attested_external=True,
-            manual_attest=(
-                "I validated this review was completed without awareness of overall score "
-                "and is unbiased."
+            import_config=ReviewImportConfig(
+                attested_external=True,
+                manual_attest=(
+                    "I validated this review was completed without awareness of overall score "
+                    "and is unbiased."
+                ),
             ),
         )
 
@@ -554,10 +565,12 @@ class TestCmdReviewPrepare:
         _do_validate_import(
             str(issues_file),
             lang,
-            attested_external=True,
-            manual_attest=(
-                "I validated this review was completed without awareness of overall score "
-                "and is unbiased."
+            import_config=ReviewImportConfig(
+                attested_external=True,
+                manual_attest=(
+                    "I validated this review was completed without awareness of overall score "
+                    "and is unbiased."
+                ),
             ),
         )
         out = capsys.readouterr().out
@@ -582,9 +595,11 @@ class TestCmdReviewPrepare:
             _do_validate_import(
                 str(issues_file),
                 lang,
-                manual_override=True,
-                manual_attest="operator note",
-                allow_partial=True,
+                import_config=ReviewImportConfig(
+                    manual_override=True,
+                    manual_attest="operator note",
+                    allow_partial=True,
+                ),
             )
 
     def test_do_import_rejects_nonexistent_file(self, empty_state):
@@ -671,7 +686,7 @@ class TestCmdReviewPrepare:
                 empty_state,
                 lang,
                 "sp",
-                allow_partial=True,
+                import_config=ReviewImportConfig(allow_partial=True),
             )
         assert mock_save.called is True
         assert empty_state.get("subjective_assessments", {}) == {}
@@ -1039,12 +1054,11 @@ class TestCmdReviewPrepare:
         assert provenance.get("blind") is True
         assert provenance.get("runner") == "codex"
         assert isinstance(provenance.get("packet_sha256"), str)
-        assert captured["kwargs"]["trusted_assessment_source"] is True
-        assert (
-            captured["kwargs"]["trusted_assessment_label"]
-            == "trusted internal run-batches import"
-        )
-        assert captured["kwargs"]["allow_partial"] is True
+        import_config = captured["kwargs"]["import_config"]
+        assert isinstance(import_config, ReviewImportConfig)
+        assert import_config.trusted_assessment_source is True
+        assert import_config.trusted_assessment_label == "trusted internal run-batches import"
+        assert import_config.allow_partial is True
         summary_files = sorted(runs_dir.glob("*/run_summary.json"))
         assert len(summary_files) == 1
         summary_payload = json.loads(summary_files[0].read_text())
@@ -1158,7 +1172,9 @@ class TestCmdReviewPrepare:
         ):
             do_run_batches(args, empty_state, lang, "fake_sp", config={})
 
-        assert captured["kwargs"]["allow_partial"] is True
+        import_config = captured["kwargs"]["import_config"]
+        assert isinstance(import_config, ReviewImportConfig)
+        assert import_config.allow_partial is True
 
     def test_do_run_batches_uses_task_map_for_execute_batches(
         self, empty_state, tmp_path
@@ -1528,7 +1544,9 @@ class TestCmdReviewPrepare:
         payload = captured["payload"]
         assert payload["assessments"]["mid_level_elegance"] == pytest.approx(74.1, abs=0.1)
         assert payload["reviewed_files"] == ["src/a.ts"]
-        assert captured["kwargs"]["allow_partial"] is True
+        import_config = captured["kwargs"]["import_config"]
+        assert isinstance(import_config, ReviewImportConfig)
+        assert import_config.allow_partial is True
         summary_files = sorted(runs_dir.glob("*/run_summary.json"))
         assert len(summary_files) == 1
         summary_payload = json.loads(summary_files[0].read_text())
@@ -1727,7 +1745,9 @@ class TestCmdReviewPrepare:
         assert abstraction["component_scores"]["Abstraction Leverage"] == 68.0
         assert abstraction["component_scores"]["Indirection Cost"] == 62.0
         assert abstraction["component_scores"]["Interface Honesty"] == 81.0
-        assert captured["kwargs"]["trusted_assessment_source"] is True
+        import_config = captured["kwargs"]["import_config"]
+        assert isinstance(import_config, ReviewImportConfig)
+        assert import_config.trusted_assessment_source is True
 
     def test_run_codex_batch_returns_127_when_runner_missing(self, tmp_path):
 

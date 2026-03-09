@@ -11,7 +11,7 @@ from desloppify.app.commands.plan.triage import _stage_validation as validation
 def _triage_input(*, dimension: str = "naming") -> SimpleNamespace:
     return SimpleNamespace(
         open_issues={
-            "review::test.py::abc123": {
+            "review::test.py::abc12345": {
                 "detail": {"dimension": dimension},
             }
         },
@@ -68,11 +68,16 @@ def test_auto_confirm_reflect_for_organize_records_confirmation(monkeypatch) -> 
         "clusters": {
             "fix-naming": {
                 "auto": False,
-                "issue_ids": ["review::test.py::abc123"],
+                "issue_ids": ["review::test.py::abc12345"],
             }
         }
     }
-    stages = {"reflect": {"stage": "reflect"}}
+    stages = {
+        "reflect": {
+            "stage": "reflect",
+            "report": "Cluster fix-naming handles review::test.py::abc12345 after code review.",
+        }
+    }
     saved: list[dict] = []
 
     monkeypatch.setattr(validation, "command_runtime", lambda _args: SimpleNamespace(state={}))
@@ -90,9 +95,56 @@ def test_auto_confirm_reflect_for_organize_records_confirmation(monkeypatch) -> 
         plan=plan,
         stages=stages,
         attestation=attestation,
+        collect_triage_input_fn=lambda _plan, _state: _triage_input(),
     )
 
     assert ok is True
     assert stages["reflect"]["confirmed_at"] == "2026-03-08T00:00:00Z"
     assert stages["reflect"]["confirmed_text"] == attestation
     assert saved == [plan]
+
+
+def test_auto_confirm_reflect_for_organize_blocks_incomplete_accounting(monkeypatch, capsys) -> None:
+    plan = {"clusters": {}}
+    stages = {
+        "reflect": {
+            "stage": "reflect",
+            "report": "Cluster alpha handles review::test.py::abc12345 only.",
+        }
+    }
+
+    monkeypatch.setattr(validation, "command_runtime", lambda _args: SimpleNamespace(state={}))
+    monkeypatch.setattr(
+        validation,
+        "collect_triage_input",
+        lambda _plan, _state: SimpleNamespace(
+            open_issues={
+                "review::test.py::abc12345": {"detail": {"dimension": "naming"}},
+                "review::test.py::def45678": {"detail": {"dimension": "naming"}},
+            },
+            resolved_issues={},
+        ),
+    )
+    monkeypatch.setattr(validation, "detect_recurring_patterns", lambda _open, _resolved: {})
+
+    ok = validation._auto_confirm_reflect_for_organize(
+        args=argparse.Namespace(),
+        plan=plan,
+        stages=stages,
+        attestation=(
+            "I have thoroughly reviewed the naming dimension and the strategy "
+            "is consistent with current code evidence and priorities."
+        ),
+        collect_triage_input_fn=lambda _plan, _state: SimpleNamespace(
+            open_issues={
+                "review::test.py::abc12345": {"detail": {"dimension": "naming"}},
+                "review::test.py::def45678": {"detail": {"dimension": "naming"}},
+            },
+            resolved_issues={},
+        ),
+    )
+
+    assert ok is False
+    assert "confirmed_at" not in stages["reflect"]
+    out = capsys.readouterr().out
+    assert "account for every open review issue exactly once" in out

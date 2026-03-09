@@ -55,7 +55,6 @@ def sync_plan_after_import(state: dict, diff: dict, assessment_mode: str) -> Non
             load_plan,
             purge_ids,
             save_plan,
-            sync_communicate_score_needed,
             sync_create_plan_needed,
             sync_import_scores_needed,
             sync_plan_after_review_import,
@@ -96,11 +95,6 @@ def sync_plan_after_import(state: dict, diff: dict, assessment_mode: str) -> Non
             dirty = True
             injected_parts.append("`workflow::score-checkpoint`")
 
-        scores_imported = assessment_mode in (
-            "trusted_internal",
-            "attested_external",
-            "manual_override",
-        )
         import_scores_result = sync_import_scores_needed(
             plan,
             state,
@@ -109,15 +103,6 @@ def sync_plan_after_import(state: dict, diff: dict, assessment_mode: str) -> Non
         if import_scores_result.changes:
             dirty = True
             injected_parts.append("`workflow::import-scores`")
-
-        communicate_result = sync_communicate_score_needed(
-            plan,
-            state,
-            scores_just_imported=scores_imported,
-        )
-        if communicate_result.changes:
-            dirty = True
-            injected_parts.append("`workflow::communicate-score`")
 
         create_plan_result = sync_create_plan_needed(plan, state)
         if create_plan_result.changes:

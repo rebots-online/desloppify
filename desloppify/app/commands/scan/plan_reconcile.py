@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from desloppify.app.commands.scan.workflow import ScanRuntime
@@ -132,6 +132,8 @@ def _seed_plan_start_scores(plan: dict[str, object], state: state_mod.StateModel
         "objective": scores.objective,
         "verified": scores.verified,
     }
+    # New cycle — clear the communicate-score sentinel so it can fire again.
+    plan.pop("previous_plan_start_scores", None)
     # Record scan count at cycle start so gates can detect whether a new scan ran
     plan["scan_count_at_plan_start"] = int(state.get("scan_count", 0) or 0)
     return True
@@ -160,6 +162,12 @@ def _clear_plan_start_scores_if_queue_empty(
     """Clear plan-start score snapshot once the queue is fully drained."""
     if not plan.get("plan_start_scores"):
         return False
+    # Don't clear while communicate-score is pending — the rebaseline just
+    # set plan_start_scores and the user hasn't seen the update yet.
+    from desloppify.engine._plan.constants import WORKFLOW_COMMUNICATE_SCORE_ID
+
+    if WORKFLOW_COMMUNICATE_SCORE_ID in plan.get("queue_order", []):
+        return False
 
     try:
         from desloppify.app.commands.helpers.queue_progress import (
@@ -178,6 +186,9 @@ def _clear_plan_start_scores_if_queue_empty(
         return False
     state["_plan_start_scores_for_reveal"] = dict(plan["plan_start_scores"])
     plan["plan_start_scores"] = {}
+    # Clear the cycle sentinel so communicate-score can be injected
+    # in the next cycle.
+    plan.pop("previous_plan_start_scores", None)
     return True
 
 
@@ -349,20 +360,12 @@ def _sync_plan_start_scores_and_log(
     plan: dict[str, object],
     state: state_mod.StateModel,
 ) -> bool:
-    objective_cycle = _has_objective_cycle(state, plan)
-    if objective_cycle is None:
-        return False
-    if objective_cycle:
-        seeded = _seed_plan_start_scores(plan, state)
-        if seeded:
-            append_log_entry(plan, "seed_start_scores", actor="system", detail={})
-        return seeded
-
-    existing = plan.get("plan_start_scores")
-    if isinstance(existing, dict) and existing.get("strict") is None and existing.get("reset"):
-        plan["plan_start_scores"] = {}
+    seeded = _seed_plan_start_scores(plan, state)
+    if seeded:
+        append_log_entry(plan, "seed_start_scores", actor="system", detail={})
         return True
-
+    # Only clear scores that existed before this reconcile pass —
+    # never clear scores we just seeded in the same scan.
     cleared = _clear_plan_start_scores_if_queue_empty(state, plan)
     if cleared:
         append_log_entry(plan, "clear_start_scores", actor="system", detail={})
@@ -384,27 +387,18 @@ def _sync_postflight_scan_completion_and_log(
     return changed
 
 
-def _run_sync_steps(step_fns: list[Callable[[], bool]]) -> bool:
-    """Run sync steps and return whether any step changed the plan."""
-    dirty = False
-    for step_fn in step_fns:
-        if step_fn():
-            dirty = True
-    return dirty
-
-
 def _sync_post_scan_without_policy(
     *,
     plan: dict[str, object],
     state: state_mod.StateModel,
 ) -> bool:
     """Run post-scan sync steps that do not require subjective policy context."""
-    return _run_sync_steps(
-        [
-            lambda: _apply_plan_reconciliation(plan, state, reconcile_plan_after_scan),
-            lambda: _sync_unscored_and_log(plan, state),
-        ]
-    )
+    dirty = False
+    if _apply_plan_reconciliation(plan, state, reconcile_plan_after_scan):
+        dirty = True
+    if _sync_unscored_and_log(plan, state):
+        dirty = True
+    return dirty
 
 
 def _sync_post_scan_with_policy(
@@ -416,28 +410,33 @@ def _sync_post_scan_with_policy(
     cycle_just_completed: bool,
 ) -> bool:
     """Run post-scan sync steps that require policy/cycle context."""
-    return _run_sync_steps(
-        [
-            lambda: _sync_stale_and_log(
-                plan,
-                state,
-                policy=policy,
-                cycle_just_completed=cycle_just_completed,
-            ),
-            lambda: _sync_auto_clusters_and_log(
-                plan,
-                state,
-                target_strict=target_strict,
-                policy=policy,
-                cycle_just_completed=cycle_just_completed,
-            ),
-            lambda: _sync_communicate_score_and_log(plan, state, policy=policy),
-            lambda: _sync_create_plan_and_log(plan, state, policy=policy),
-            lambda: _sync_triage_and_log(plan, state, policy=policy),
-            lambda: _sync_plan_start_scores_and_log(plan, state),
-            lambda: _sync_postflight_scan_completion_and_log(plan, state),
-        ]
-    )
+    dirty = False
+    if _sync_stale_and_log(
+        plan,
+        state,
+        policy=policy,
+        cycle_just_completed=cycle_just_completed,
+    ):
+        dirty = True
+    if _sync_auto_clusters_and_log(
+        plan,
+        state,
+        target_strict=target_strict,
+        policy=policy,
+        cycle_just_completed=cycle_just_completed,
+    ):
+        dirty = True
+    if _sync_communicate_score_and_log(plan, state, policy=policy):
+        dirty = True
+    if _sync_create_plan_and_log(plan, state, policy=policy):
+        dirty = True
+    if _sync_triage_and_log(plan, state, policy=policy):
+        dirty = True
+    if _sync_plan_start_scores_and_log(plan, state):
+        dirty = True
+    if _sync_postflight_scan_completion_and_log(plan, state):
+        dirty = True
+    return dirty
 
 
 def reconcile_plan_post_scan(runtime: ScanRuntime) -> None:
@@ -449,11 +448,14 @@ def reconcile_plan_post_scan(runtime: ScanRuntime) -> None:
         logger.warning("Plan reconciliation skipped (load failed): %s", exc)
         return
 
+    dirty = _sync_post_scan_without_policy(plan=plan, state=runtime.state)
+
+    # Policy must be computed after the without-policy steps, which mutate
+    # plan (reconcile/prune) and state (unscored sync) before policy reads them.
     target_strict, policy, cycle_just_completed = _subjective_policy_context(
         runtime,
         plan,
     )
-    dirty = _sync_post_scan_without_policy(plan=plan, state=runtime.state)
     dirty = _sync_post_scan_with_policy(
         plan=plan,
         state=runtime.state,

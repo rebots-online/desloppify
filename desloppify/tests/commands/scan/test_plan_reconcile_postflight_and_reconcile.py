@@ -211,7 +211,8 @@ class TestReconcilePlanPostScan:
         reconcile_mod.reconcile_plan_post_scan(_runtime(state=state))
 
         assert len(saved) == 1
-        assert saved[0]["plan_start_scores"] == {}
+        # Scores get seeded because the state has scores and plan_start_scores was empty.
+        assert isinstance(saved[0]["plan_start_scores"].get("strict"), float)
         assert saved[0]["refresh_state"]["postflight_scan_completed_at_scan_count"] == 1
 
     def test_superseded_issue_removed_from_clusters(self, monkeypatch):

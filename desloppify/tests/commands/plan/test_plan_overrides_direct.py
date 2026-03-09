@@ -8,12 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from desloppify.base.exception_sets import CommandError
 import desloppify.app.commands.plan.override_io as override_io_mod
 import desloppify.app.commands.plan.override_misc as override_misc_mod
 import desloppify.app.commands.plan.override_resolve_cmd as override_resolve_cmd_mod
 import desloppify.app.commands.plan.override_resolve_helpers as resolve_helpers_mod
 import desloppify.app.commands.plan.override_skip as override_skip_mod
+from desloppify.base.exception_sets import CommandError
 
 
 def test_override_io_snapshot_restore_and_plan_file_resolution(monkeypatch, tmp_path) -> None:
@@ -170,7 +170,11 @@ def test_override_misc_focus_and_scan_gate_paths(monkeypatch, capsys) -> None:
 
 def test_override_skip_helpers_and_commands(monkeypatch, capsys) -> None:
     monkeypatch.setattr(override_skip_mod, "skip_kind_requires_attestation", lambda _kind: True)
-    monkeypatch.setattr(override_skip_mod, "validate_attestation", lambda _att: False)
+    monkeypatch.setattr(
+        override_skip_mod,
+        "validate_attestation",
+        lambda _att, **_kwargs: False,
+    )
     assert (
         override_skip_mod._validate_skip_requirements(
             kind="permanent",
@@ -254,3 +258,39 @@ def test_override_skip_helpers_and_commands(monkeypatch, capsys) -> None:
     )
     out = capsys.readouterr().out
     assert "Unskipped 1 item(s)" in out
+
+
+def test_cmd_plan_skip_invalid_permanent_skip_exits_nonzero(monkeypatch) -> None:
+    runtime = SimpleNamespace(
+        state={"last_scan": "2026-03-01T00:00:00+00:00", "scan_count": 2, "issues": {}},
+        state_path=None,
+    )
+    monkeypatch.setattr(override_skip_mod, "command_runtime", lambda _args: runtime)
+    monkeypatch.setattr(override_skip_mod, "require_completed_scan", lambda _state: True)
+
+    with pytest.raises(CommandError) as excinfo:
+        override_skip_mod.cmd_plan_skip(
+            argparse.Namespace(
+                patterns=["review::foo::deadbeef"],
+                reason=None,
+                review_after=None,
+                permanent=True,
+                false_positive=False,
+                note="Reviewed as intentional architecture debt with a concrete justification.",
+                attest="I reviewed this and will suppress it.",
+                confirm=False,
+            )
+        )
+
+    assert excinfo.value.exit_code == 2
+
+
+def test_validate_skip_requirements_accepts_review_attestation() -> None:
+    assert override_skip_mod._validate_skip_requirements(
+        kind="permanent",
+        attestation=(
+            "I have reviewed this triage skip against the code and I am not gaming "
+            "the score by suppressing a real defect."
+        ),
+        note="Reviewed and intentionally accepted for now.",
+    )

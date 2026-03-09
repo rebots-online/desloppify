@@ -81,8 +81,8 @@ def _name_family(name: str) -> str:
 def detect_responsibility_cohesion(
     path: Path,
     *,
-    min_loc: int = 200,
-    min_functions: int = 8,
+    min_loc: int = 300,
+    min_functions: int = 10,
 ) -> tuple[list[dict], int]:
     """Detect large modules that split into disconnected responsibility clusters."""
     entries: list[dict] = []
@@ -135,10 +135,20 @@ def detect_responsibility_cohesion(
         import_cluster_count = len(non_empty_import_sets)
 
         has_disconnected_clusters = len(components) >= 3 and largest <= int(
-            len(functions) * 0.65
+            len(functions) * 0.50
         )
-        has_mixed_families = family_count >= 4 and len(components) >= 2
-        has_import_divergence = import_cluster_count >= 3 and len(components) >= 2
+        # Require at least 3 components with meaningful sizes — a (19,1) split
+        # is a cohesive module with one utility, not mixed responsibilities.
+        min_component_size = max(2, len(functions) // 10)
+        significant_components = sum(1 for s in comp_sizes if s >= min_component_size)
+        has_mixed_families = (
+            family_count >= 5
+            and significant_components >= 3
+        )
+        has_import_divergence = (
+            import_cluster_count >= 4
+            and significant_components >= 3
+        )
         if not (has_disconnected_clusters or has_mixed_families or has_import_divergence):
             continue
 

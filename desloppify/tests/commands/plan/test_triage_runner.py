@@ -59,6 +59,47 @@ def test_build_reflect_prompt_includes_prior(tmp_path: Path) -> None:
     prompt = build_stage_prompt("reflect", si, prior, repo_root=tmp_path)
     assert "REFLECT" in prompt
     assert "My observation report" in prompt
+    assert "## Required Issue Hashes" in prompt
+    assert "exactly once" in prompt
+
+
+def test_build_stage_prompt_places_prior_reports_before_issue_data(tmp_path: Path) -> None:
+    si = _make_triage_input()
+    prior = {"reflect": "Cluster blueprint goes here."}
+    prompt = build_stage_prompt("organize", si, prior, repo_root=tmp_path)
+    assert prompt.index("## Prior Stage Reports") < prompt.index("## Issue Summary")
+    assert "Do not go\nsearch old triage runs" in prompt
+
+
+def test_build_organize_prompt_uses_compact_issue_summary_and_relevant_prior_report(tmp_path: Path) -> None:
+    si = _make_triage_input()
+    prior = {
+        "observe": "Long observe report",
+        "reflect": "Cluster blueprint goes here.",
+        "organize": "older organize report",
+    }
+    prompt = build_stage_prompt("organize", si, prior, repo_root=tmp_path)
+    assert "### REFLECT Report" in prompt
+    assert "### OBSERVE Report" not in prompt
+    assert "## Issue Summary" in prompt
+    assert "## Issue Data" not in prompt
+
+
+def test_build_reflect_prompt_output_only_for_codex_runner(tmp_path: Path) -> None:
+    si = _make_triage_input()
+    prior = {"observe": "My observation report about themes and root causes."}
+    prompt = build_stage_prompt(
+        "reflect",
+        si,
+        prior,
+        repo_root=tmp_path,
+        mode="output_only",
+    )
+    assert "Do NOT run any `desloppify` commands." in prompt
+    assert "Do NOT debug, repair, reinstall, or inspect the `desloppify` CLI/environment." in prompt
+    assert "orchestrator records and confirms the stage" in prompt
+    assert "CLI Command Reference" not in prompt
+    assert 'desloppify plan triage --stage reflect --report "' not in prompt
 
 
 def test_build_organize_prompt(tmp_path: Path) -> None:
@@ -71,6 +112,22 @@ def test_build_organize_prompt(tmp_path: Path) -> None:
     assert "--effort" in prompt
 
 
+def test_build_organize_prompt_uses_exact_cli_command_when_provided(tmp_path: Path) -> None:
+    si = _make_triage_input()
+    prior = {"observe": "obs", "reflect": "ref"}
+    prompt = build_stage_prompt(
+        "organize",
+        si,
+        prior,
+        repo_root=tmp_path,
+        cli_command="/tmp/run_desloppify.sh",
+    )
+    assert "/tmp/run_desloppify.sh plan cluster create" in prompt
+    assert "Use the exact CLI command prefix shown" in prompt
+    assert "Do NOT debug, repair, reinstall, or inspect the CLI/environment." in prompt
+    assert "write a short plain-text summary to stdout" in prompt
+
+
 def test_build_enrich_prompt(tmp_path: Path) -> None:
     si = _make_triage_input()
     prior = {"observe": "obs", "reflect": "ref", "organize": "org"}
@@ -78,6 +135,21 @@ def test_build_enrich_prompt(tmp_path: Path) -> None:
     assert "ENRICH" in prompt
     assert "--issue-refs" in prompt
     assert "exist on disk" in prompt
+
+
+def test_build_organize_prompt_output_only_omits_mutating_cli_instructions(tmp_path: Path) -> None:
+    si = _make_triage_input()
+    prior = {"observe": "obs", "reflect": "ref"}
+    prompt = build_stage_prompt(
+        "organize",
+        si,
+        prior,
+        repo_root=tmp_path,
+        mode="output_only",
+    )
+    assert "write a plain-text organize report" in prompt
+    assert "desloppify plan cluster create" not in prompt
+    assert "desloppify plan skip --permanent" not in prompt
 
 
 # ---------- Stage validation ----------
@@ -120,6 +192,21 @@ def test_validate_observe_low_citations(tmp_path: Path) -> None:
     ok, msg = validate_stage("observe", plan, {}, tmp_path)
     assert not ok
     assert "cites only" in msg
+
+
+def test_validate_reflect_requires_full_issue_accounting(tmp_path: Path) -> None:
+    plan = _plan_with_stages(
+        reflect={
+            "report": "x" * 150,
+            "cited_ids": ["review::design::aaaabbbb"],
+            "issue_count": 2,
+            "missing_issue_ids": ["review::design::ccccdddd"],
+            "duplicate_issue_ids": [],
+        }
+    )
+    ok, msg = validate_stage("reflect", plan, {}, tmp_path)
+    assert not ok
+    assert "unaccounted" in msg
 
 
 def test_validate_organize_no_clusters(tmp_path: Path) -> None:
@@ -205,7 +292,9 @@ def test_validate_enrich_vague_detail(tmp_path: Path) -> None:
 
 def test_underspecified_catches_refs_but_no_detail(tmp_path: Path) -> None:
     """A step with issue_refs but no detail should be caught."""
-    from desloppify.app.commands.plan.triage._stage_validation import _underspecified_steps
+    from desloppify.app.commands.plan.triage._stage_validation import (
+        _underspecified_steps,
+    )
 
     plan = {
         "clusters": {
@@ -225,7 +314,9 @@ def test_underspecified_catches_refs_but_no_detail(tmp_path: Path) -> None:
 
 def test_underspecified_catches_detail_but_no_refs(tmp_path: Path) -> None:
     """A step with detail but no issue_refs should be caught."""
-    from desloppify.app.commands.plan.triage._stage_validation import _underspecified_steps
+    from desloppify.app.commands.plan.triage._stage_validation import (
+        _underspecified_steps,
+    )
 
     plan = {
         "clusters": {
@@ -243,7 +334,9 @@ def test_underspecified_catches_detail_but_no_refs(tmp_path: Path) -> None:
 
 def test_underspecified_passes_complete_step() -> None:
     """A step with both detail and issue_refs should pass."""
-    from desloppify.app.commands.plan.triage._stage_validation import _underspecified_steps
+    from desloppify.app.commands.plan.triage._stage_validation import (
+        _underspecified_steps,
+    )
 
     plan = {
         "clusters": {
@@ -269,7 +362,9 @@ def test_underspecified_passes_complete_step() -> None:
 
 def test_vague_detail_flags_missing_detail(tmp_path: Path) -> None:
     """A step with no detail at all should be flagged as vague."""
-    from desloppify.app.commands.plan.triage._stage_validation import _steps_with_vague_detail
+    from desloppify.app.commands.plan.triage._stage_validation import (
+        _steps_with_vague_detail,
+    )
 
     plan = {
         "clusters": {
@@ -289,7 +384,9 @@ def test_vague_detail_flags_missing_detail(tmp_path: Path) -> None:
 
 def test_vague_detail_flags_empty_string_detail(tmp_path: Path) -> None:
     """A step with empty string detail should be flagged as vague."""
-    from desloppify.app.commands.plan.triage._stage_validation import _steps_with_vague_detail
+    from desloppify.app.commands.plan.triage._stage_validation import (
+        _steps_with_vague_detail,
+    )
 
     plan = {
         "clusters": {

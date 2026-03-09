@@ -90,6 +90,7 @@ PLAN_PUBLIC_EXPORTS = [
     "is_triage_stale",
     "mark_postflight_scan_completed",
     "postflight_scan_pending",
+    "ScoreSnapshot",
     "sync_communicate_score_needed",
     "sync_create_plan_needed",
     "sync_import_scores_needed",

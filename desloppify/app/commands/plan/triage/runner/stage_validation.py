@@ -7,18 +7,18 @@ from pathlib import Path
 
 from desloppify.engine.plan import TriageInput
 
-from ..helpers import manual_clusters_with_issues, observe_dimension_breakdown
-from ..stage_helpers import unclustered_review_issues, unenriched_clusters
 from .._stage_validation import (
     _cluster_file_overlaps,
     _clusters_with_directory_scatter,
     _clusters_with_high_step_ratio,
-    _underspecified_steps,
     _steps_missing_issue_refs,
     _steps_with_bad_paths,
     _steps_with_vague_detail,
     _steps_without_effort,
+    _underspecified_steps,
 )
+from ..helpers import manual_clusters_with_issues, observe_dimension_breakdown
+from ..stage_helpers import unclustered_review_issues, unenriched_clusters
 
 
 @dataclass(frozen=True)
@@ -138,6 +138,19 @@ def validate_stage(
         report = stages["reflect"].get("report", "")
         if len(report) < 100:
             return False, f"Reflect report too short ({len(report)} chars, need 100+)."
+        missing = stages["reflect"].get("missing_issue_ids", [])
+        if missing:
+            return False, f"Reflect report leaves {len(missing)} issue(s) unaccounted for."
+        duplicates = stages["reflect"].get("duplicate_issue_ids", [])
+        if duplicates:
+            return False, f"Reflect report duplicates {len(duplicates)} issue(s)."
+        issue_count = int(stages["reflect"].get("issue_count", 0) or 0)
+        cited = stages["reflect"].get("cited_ids", [])
+        if issue_count > 0 and len(cited) < issue_count:
+            return False, (
+                f"Reflect report cites only {len(cited)}/{issue_count} issue(s). "
+                "A reflect blueprint must account for every open review issue."
+            )
         return True, ""
 
     if stage == "organize":

@@ -219,8 +219,13 @@ def build_communicate_score_item(plan: dict, state: dict) -> WorkQueueItem | Non
 
     snapshot = state_mod.score_snapshot(state)
     strict = snapshot.strict if snapshot.strict is not None else 0.0
-    plan_start = (plan.get("plan_start_scores") or {}).get("strict")
-    delta = round(strict - plan_start, 1) if plan_start is not None else None
+
+    # Use previous_plan_start_scores (stashed at rebaseline) for the delta
+    # so the user sees old-baseline → current, not current → current.
+    prev_start = (plan.get("previous_plan_start_scores") or {}).get("strict")
+    if prev_start is None:
+        prev_start = (plan.get("plan_start_scores") or {}).get("strict")
+    delta = round(strict - prev_start, 1) if prev_start is not None else None
     delta_str = f" ({'+' if delta > 0 else ''}{delta:.1f})" if delta else ""
 
     return {
@@ -233,7 +238,7 @@ def build_communicate_score_item(plan: dict, state: dict) -> WorkQueueItem | Non
         "summary": f"Communicate updated score to user: strict {strict:.1f}/100{delta_str}",
         "detail": {
             "strict": strict,
-            "plan_start_strict": plan_start,
+            "previous_plan_start_strict": prev_start,
             "delta": delta,
         },
         "primary_command": (

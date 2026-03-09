@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 
 from desloppify.base.output.terminal import colorize
 
@@ -16,23 +17,41 @@ def _emit_warning(message: str) -> None:
     print(colorize(message, "yellow"), file=sys.stderr)
 
 
-def _missing_attestation_keywords(attestation: str | None) -> list[str]:
+def _missing_attestation_keywords(
+    attestation: str | None,
+    *,
+    required_phrases: Sequence[str] | None = None,
+) -> list[str]:
     normalized = " ".join((attestation or "").strip().lower().split())
+    phrases = tuple(required_phrases or _REQUIRED_ATTESTATION_PHRASES)
     return [
-        phrase for phrase in _REQUIRED_ATTESTATION_PHRASES if phrase not in normalized
+        phrase for phrase in phrases if phrase not in normalized
     ]
 
 
-def validate_attestation(attestation: str | None) -> bool:
-    return not _missing_attestation_keywords(attestation)
+def validate_attestation(
+    attestation: str | None,
+    *,
+    required_phrases: Sequence[str] | None = None,
+) -> bool:
+    return not _missing_attestation_keywords(
+        attestation,
+        required_phrases=required_phrases,
+    )
 
 
 def show_attestation_requirement(
     label: str,
     attestation: str | None,
     example: str,
+    *,
+    required_phrases: Sequence[str] | None = None,
 ) -> None:
-    missing = _missing_attestation_keywords(attestation)
+    phrases = tuple(required_phrases or _REQUIRED_ATTESTATION_PHRASES)
+    missing = _missing_attestation_keywords(
+        attestation,
+        required_phrases=phrases,
+    )
     if not attestation:
         _emit_warning(f"{label} requires --attest.")
     elif missing:
@@ -40,9 +59,14 @@ def show_attestation_requirement(
         _emit_warning(
             f"{label} attestation is missing required keyword(s): {missing_str}."
         )
-    _emit_warning(
-        f"Required keywords: '{_ATTESTATION_KEYWORD_HINT[0]}' and '{_ATTESTATION_KEYWORD_HINT[1]}'."
+    display_phrases = (
+        _ATTESTATION_KEYWORD_HINT if required_phrases is None else tuple(required_phrases)
     )
+    if len(display_phrases) == 2:
+        phrase_text = f"'{display_phrases[0]}' and '{display_phrases[1]}'"
+    else:
+        phrase_text = ", ".join(f"'{phrase}'" for phrase in display_phrases)
+    _emit_warning(f"Required keywords: {phrase_text}.")
     print(colorize(f'Example: --attest "{example}"', "dim"), file=sys.stderr)
 
 

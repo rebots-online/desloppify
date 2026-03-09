@@ -40,65 +40,6 @@ _SCORECARD_SUBJECTIVE_AT_TARGET = bind_scorecard_subjective_at_target(
 )
 
 
-def _optional_bool(value: object, *, default: bool = False) -> bool:
-    if value is None:
-        return default
-    return bool(value)
-
-
-def _optional_text(value: object) -> str | None:
-    if value is None:
-        return None
-    return str(value)
-
-
-def _legacy_import_config(
-    *,
-    import_config: ReviewImportConfig | None,
-    legacy_kwargs: dict[str, object],
-) -> ReviewImportConfig:
-    """Resolve config object from modern argument or legacy keyword args."""
-    allowed_keys = {
-        "config",
-        "allow_partial",
-        "trusted_assessment_source",
-        "trusted_assessment_label",
-        "attested_external",
-        "manual_override",
-        "manual_attest",
-    }
-    unknown = sorted(set(legacy_kwargs) - allowed_keys)
-    if unknown:
-        joined = ", ".join(unknown)
-        raise TypeError(f"Unexpected keyword argument(s): {joined}")
-    if import_config is not None and legacy_kwargs:
-        raise TypeError("Pass either import_config=... or legacy keyword args, not both")
-    if import_config is not None:
-        return import_config
-    config_obj = legacy_kwargs.get("config")
-    config_dict = config_obj if isinstance(config_obj, dict) else None
-    return ReviewImportConfig(
-        config=config_dict,
-        allow_partial=_optional_bool(legacy_kwargs.get("allow_partial"), default=False),
-        trusted_assessment_source=_optional_bool(
-            legacy_kwargs.get("trusted_assessment_source"),
-            default=False,
-        ),
-        trusted_assessment_label=_optional_text(
-            legacy_kwargs.get("trusted_assessment_label")
-        ),
-        attested_external=_optional_bool(
-            legacy_kwargs.get("attested_external"),
-            default=False,
-        ),
-        manual_override=_optional_bool(
-            legacy_kwargs.get("manual_override"),
-            default=False,
-        ),
-        manual_attest=_optional_text(legacy_kwargs.get("manual_attest")),
-    )
-
-
 def _resolve_import_payload(
     import_file,
     *,
@@ -238,13 +179,9 @@ def do_import(
     *,
     import_config: ReviewImportConfig | None = None,
     dry_run: bool = False,
-    **legacy_kwargs,
 ) -> None:
     """Import mode: ingest agent-produced issues."""
-    resolved_import_config = _legacy_import_config(
-        import_config=import_config,
-        legacy_kwargs=legacy_kwargs,
-    )
+    resolved_import_config = import_config or ReviewImportConfig()
     issues_data, _override_enabled, override_attest = _resolve_import_payload(
         import_file,
         lang_name=lang.name,
@@ -311,13 +248,9 @@ def do_validate_import(
     lang,
     *,
     import_config: ReviewImportConfig | None = None,
-    **legacy_kwargs,
 ) -> None:
     """Validate import payload/policy and print mode without mutating state."""
-    resolved_import_config = _legacy_import_config(
-        import_config=import_config,
-        legacy_kwargs=legacy_kwargs,
-    )
+    resolved_import_config = import_config or ReviewImportConfig()
     override_enabled, override_attest = import_helpers_mod.resolve_override_context(
         manual_override=resolved_import_config.manual_override,
         manual_attest=resolved_import_config.manual_attest,

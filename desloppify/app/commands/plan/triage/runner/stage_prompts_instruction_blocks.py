@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+from .stage_prompts_instruction_shared import PromptMode
 
-def _observe_instructions() -> str:
-    return """\
+
+def _observe_instructions(mode: PromptMode = "self_record") -> str:
+    tail = """\
+When done, run:
+```
+desloppify plan triage --stage observe --report "<your analysis with [hash] citations>"
+```
+"""
+    if mode == "output_only":
+        tail = """\
+When done, write a plain-text observe report with [hash] citations and specific evidence.
+The orchestrator records and confirms the stage.
+"""
+    return f"""\
 ## OBSERVE Stage Instructions
 
 Your task: verify every open review issue against the actual source code.
@@ -54,15 +67,23 @@ Example subagent split for 90 issues across 17 dimensions:
 2. Your verdict (genuine / false positive / exaggerated / over-engineering)
 3. The specific evidence (what you found when you read the code)
 
-When done, run:
-```
-desloppify plan triage --stage observe --report "<your analysis with [hash] citations>"
-```
+{tail}
 """
 
 
-def _reflect_instructions() -> str:
-    return """\
+def _reflect_instructions(mode: PromptMode = "self_record") -> str:
+    tail = """\
+When done, run:
+```
+desloppify plan triage --stage reflect --report "<your strategy with cluster blueprint>" --attestation "<80+ chars mentioning dimensions or recurring patterns>"
+```
+"""
+    if mode == "output_only":
+        tail = """\
+When done, write a plain-text reflect report with a concrete cluster blueprint.
+The orchestrator records and confirms the stage.
+"""
+    return f"""\
 ## REFLECT Stage Instructions
 
 Your task: using the verdicts from observe, design the cluster structure.
@@ -81,6 +102,9 @@ says "here's what we should DO about it, and here's what we should NOT do, and h
 6. **Check recurring patterns** — compare current issues against resolved history. If the same
    dimension keeps producing issues, that's a root cause that needs addressing, not just
    another round of fixes.
+7. **Account for every issue exactly once** — every open issue hash must appear in exactly one
+   cluster line or one skip line. Do not drop hashes, and do not repeat a hash in multiple
+   clusters or in both a cluster and a skip.
 
 ### Your report MUST include a concrete cluster blueprint
 
@@ -91,12 +115,20 @@ Cluster "task-typing": issues A, B (both touch src/types/database.ts)
 Skip: issue W (false positive per observe), issue V (over-engineering — fix adds 50 lines for 3 lines saved)
 ```
 
+### Hard accounting rule
+
+- Mention each issue hash **once and only once** in the blueprint.
+- Do **not** mention issue hashes again in rationale paragraphs, recurring-pattern notes, or
+  ordering explanations. After the blueprint, refer to clusters by name.
+- Before finishing, do a self-check: cluster hashes + skip hashes must equal all open issue hashes.
+
 ### What a LAZY reflect looks like (will be rejected):
 - Restating observe findings in slightly different words
 - "We should prioritize high-impact items and defer low-priority ones"
 - A bulleted list of dimensions without any strategic thinking
 - Ignoring recurring patterns
 - No cluster blueprint (just vague grouping ideas)
+- Missing or duplicated issue hashes
 
 ### What a GOOD reflect looks like:
 - "50% false positive rate. Of 34 issues, 17 are genuine. 10 of those are batch-scriptable
@@ -106,29 +138,19 @@ Skip: issue W (false positive per observe), issue V (over-engineering — fix ad
   Skip: issue W (false positive), issue V (over-engineering).
   design_coherence recurs (2 resolved, 5 open) but only 1 of the 5 actually warrants work."
 
-When done, run:
-```
-desloppify plan triage --stage reflect --report "<your strategy with cluster blueprint>" --attestation "<80+ chars mentioning dimensions or recurring patterns>"
-```
+{tail}
 """
 
 
-def _organize_instructions() -> str:
-    return """\
-## ORGANIZE Stage Instructions
-
-Your task: execute the cluster blueprint from the reflect stage.
-
-The reflect report contains a specific plan: which clusters to create, which issues go
-where, what to skip. Build it using the CLI. If something doesn't work as planned
-(issue hash doesn't match, file proximity doesn't hold), adjust and document why.
-
-This stage should be largely mechanical. If you find yourself making major strategic
-decisions, something went wrong in reflect — the strategy should already be decided.
-
-### Process
-
-1. Review the reflect report's cluster blueprint (provided below)
+def _organize_instructions(mode: PromptMode = "self_record") -> str:
+    intro = (
+        "The reflect report contains a specific plan: which clusters to create, which issues go\n"
+        "where, what to skip. The reflect report included above is authoritative. Do not go\n"
+        "search old triage runs for a different blueprint unless you find a concrete mismatch.\n"
+        "Build it using the CLI. If something doesn't work as planned\n"
+        "(issue hash doesn't match, file proximity doesn't hold), adjust and document why."
+    )
+    process_block = """\
 2. **Skip false positives and over-engineering** identified in observe/reflect. Every skip needs a
    per-issue justification — not "low priority" but "false positive: the code at line 47
    already uses named constants, contradicting the issue's claim":
@@ -141,6 +163,50 @@ decisions, something went wrong in reflect — the strategy should already be de
 5. Add steps that consolidate: one step per file or logical change, NOT one step per issue
 6. Set `--effort` on each step individually (trivial/small/medium/large)
 7. Set `--depends-on` when clusters touch overlapping files
+"""
+    tail = """\
+When done, run:
+```
+desloppify plan triage --stage organize --report "<summary of priorities and organization>" --attestation "<80+ chars mentioning cluster names>"
+```
+"""
+    if mode == "output_only":
+        intro = (
+            "The reflect report contains a specific plan: which clusters to create, which issues go\n"
+            "where, what to skip. The reflect report included above is authoritative. Do not go\n"
+            "search old triage runs for a different blueprint unless you find a concrete mismatch.\n"
+            "Translate that plan into a precise organize report. If something\n"
+            "doesn't work as planned (issue hash doesn't match, file proximity doesn't hold), adjust\n"
+            "and document why."
+        )
+        process_block = """\
+2. **Decide skips** for false positives and over-engineering identified in observe/reflect.
+   Every skip still needs a per-issue justification — not "low priority" but the specific
+   contradiction or over-engineering reason.
+3. Define the clusters exactly as they should be created.
+4. Assign every kept issue to a cluster.
+5. Consolidate steps: one step per file or logical change, NOT one step per issue.
+6. Assign an effort level to each planned step (trivial/small/medium/large).
+7. Call out cross-cluster dependencies when clusters touch overlapping files.
+"""
+        tail = """\
+When done, write a plain-text organize report that names the clusters, their issue membership,
+their consolidated steps, and any skip/dependency decisions. The orchestrator records the stage.
+"""
+    return f"""\
+## ORGANIZE Stage Instructions
+
+Your task: execute the cluster blueprint from the reflect stage.
+
+{intro}
+
+This stage should be largely mechanical. If you find yourself making major strategic
+decisions, something went wrong in reflect — the strategy should already be decided.
+
+### Process
+
+1. Review the reflect report's cluster blueprint (provided below)
+{process_block}
 
 ### Quality gates (the confirmation will check these)
 
@@ -154,15 +220,43 @@ Before recording, verify:
 
 Every review issue must end up in a cluster OR be skipped.
 
-When done, run:
-```
-desloppify plan triage --stage organize --report "<summary of priorities and organization>" --attestation "<80+ chars mentioning cluster names>"
-```
+{tail}
 """
 
 
-def _enrich_instructions() -> str:
-    return """\
+def _enrich_instructions(mode: PromptMode = "self_record") -> str:
+    subagent_block = """\
+**USE SUBAGENTS — one per cluster.** Each subagent MUST:
+
+1. Run `desloppify plan cluster show <name>` to get current steps and issue list
+2. **Read the actual source file for every step** — not just the issue description.
+   The issue says what's wrong; you need to see the code to say what to DO.
+3. Write detail that includes: the file path, the specific location (line range or
+   function name), and the exact change to make
+4. Set effort based on the ACTUAL complexity you see in the code, not a guess
+"""
+    tail = """\
+When done, run:
+```
+desloppify plan triage --stage enrich --report "<enrichment summary>" --attestation "<80+ chars mentioning cluster names>"
+```
+"""
+    if mode == "output_only":
+        subagent_block = """\
+**USE SUBAGENTS — one per cluster.** Each subagent MUST:
+
+1. Inspect the cluster definition provided in the prompt context
+2. **Read the actual source file for every step** — not just the issue description.
+   The issue says what's wrong; you need to see the code to say what to DO.
+3. Write detail that includes: the file path, the specific location (line range or
+   function name), and the exact change to make
+4. Set effort based on the ACTUAL complexity you see in the code, not a guess
+"""
+        tail = """\
+When done, write a plain-text enrichment report describing the corrected step details,
+effort tags, and issue refs for each cluster. The orchestrator records the stage.
+"""
+    return f"""\
 ## ENRICH Stage Instructions
 
 Your task: make EVERY step executor-ready. The test: could a developer who has never seen
@@ -170,6 +264,8 @@ this codebase read your step detail and make the change without asking a single 
 
 If the answer is "they'd need to figure out which file" or "they'd need to understand the
 context" — your step is not ready. Be specific enough that the work is mechanical.
+Use the organize report included above as the authoritative cluster plan; do not re-derive
+strategy from old triage runs unless you find a concrete mismatch you need to explain.
 
 ### Requirements (ALL BLOCKING — confirmation will reject if not met)
 
@@ -181,14 +277,7 @@ context" — your step is not ready. Be specific enough that the work is mechani
 
 ### How to enrich
 
-**USE SUBAGENTS — one per cluster.** Each subagent MUST:
-
-1. Run `desloppify plan cluster show <name>` to get current steps and issue list
-2. **Read the actual source file for every step** — not just the issue description.
-   The issue says what's wrong; you need to see the code to say what to DO.
-3. Write detail that includes: the file path, the specific location (line range or
-   function name), and the exact change to make
-4. Set effort based on the ACTUAL complexity you see in the code, not a guess
+{subagent_block}
 
 ### Common lazy patterns to avoid
 
@@ -237,15 +326,37 @@ Only reference files that exist RIGHT NOW. Do not reference files that a step wi
 the current source file and describe what will change. The path validator will block
 confirmation if paths don't exist on disk.
 
-When done, run:
-```
-desloppify plan triage --stage enrich --report "<enrichment summary>" --attestation "<80+ chars mentioning cluster names>"
-```
+{tail}
 """
 
 
-def _sense_check_instructions() -> str:
-    return """\
+def _sense_check_instructions(mode: PromptMode = "self_record") -> str:
+    content_fix_block = (
+        'Fix with: `desloppify plan cluster update <name> --update-step N --detail "..." --effort <tag>`'
+    )
+    structure_fix_block = """\
+Fix with: `desloppify plan cluster update <name> --depends-on <other>`
+Fix with: `desloppify plan cluster update <name> --add-step "..." --detail "..." --effort trivial --issue-refs <hash>`
+"""
+    tail = """\
+When done, run:
+```
+desloppify plan triage --stage sense-check --report "<findings summary>"
+```
+"""
+    if mode == "output_only":
+        content_fix_block = (
+            "Report the exact step corrections that need to be made; the orchestrator will apply them."
+        )
+        structure_fix_block = (
+            "Report the exact dependency additions or cascade steps that need to be made; "
+            "the orchestrator will apply them.\n"
+        )
+        tail = """\
+When done, write a plain-text sense-check report with concrete content and structure fixes.
+The orchestrator records and confirms the stage.
+"""
+    return f"""\
 ## SENSE-CHECK Stage Instructions
 
 This stage is handled by two parallel subagents. If you are being run as a
@@ -268,7 +379,7 @@ For EVERY step in every cluster, read the actual source file and verify:
    - Trade one smell for a worse one (e.g. fix duplication by adding a fragile base class)
    Remove or simplify over-engineered steps. If the whole cluster is net-negative, say so.
 
-Fix with: `desloppify plan cluster update <name> --update-step N --detail "..." --effort <tag>`
+{content_fix_block}
 
 ### Structure Check (global)
 Build a file-touch graph and check:
@@ -276,13 +387,9 @@ Build a file-touch graph and check:
 2. MISSING CASCADE: Rename/remove without importer updates → add cascade step
 3. CIRCULAR DEPS: Flag cycles, don't add them
 
-Fix with: `desloppify plan cluster update <name> --depends-on <other>`
-Fix with: `desloppify plan cluster update <name> --add-step "..." --detail "..." --effort trivial --issue-refs <hash>`
+{structure_fix_block}
 
-When done, run:
-```
-desloppify plan triage --stage sense-check --report "<findings summary>"
-```
+{tail}
 """
 
 

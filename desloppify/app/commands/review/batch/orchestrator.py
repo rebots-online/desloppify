@@ -22,6 +22,7 @@ from desloppify.intelligence.review.feedback_contract import (
 
 from ..helpers import parse_dimensions
 from ..importing.cmd import do_import as _do_import
+from ..importing.flags import ReviewImportConfig
 from ..packet.policy import coerce_review_batch_file_limit, redacted_review_config
 from ..runner_failures import print_failures, print_failures_and_raise
 from ..runner_packets import (
@@ -499,10 +500,12 @@ def do_import_run(
         state,
         lang,
         state_file,
-        config=config,
-        allow_partial=allow_partial,
-        trusted_assessment_source=True,
-        trusted_assessment_label=f"trusted import-run replay from {run_dir.name}",
+        import_config=ReviewImportConfig(
+            config=config,
+            allow_partial=allow_partial,
+            trusted_assessment_source=True,
+            trusted_assessment_label=f"trusted import-run replay from {run_dir.name}",
+        ),
         dry_run=dry_run,
     )
 

@@ -25,7 +25,7 @@ def merge_structural_signals(
     structural: dict,
     stderr_fn,
     *,
-    complexity_only_min: int = 35,
+    complexity_only_min: int = 50,
 ) -> list[Issue]:
     """Convert per-file structural signals into tiered issues.
 

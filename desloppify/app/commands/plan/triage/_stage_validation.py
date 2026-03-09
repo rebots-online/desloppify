@@ -3,41 +3,54 @@
 from __future__ import annotations
 
 import argparse
+import re
+from collections import Counter
 
 from desloppify.app.commands.helpers.runtime import command_runtime
 from desloppify.base.output.terminal import colorize
-from desloppify.engine.plan import collect_triage_input, detect_recurring_patterns, save_plan
+from desloppify.engine.plan import (
+    collect_triage_input,
+    detect_recurring_patterns,
+    extract_issue_citations,
+    save_plan,
+)
 from desloppify.state import utc_now
 
+from ._stage_validation_completion_policy import (
+    _completion_clusters_valid,
+    _completion_strategy_valid,
+    _confirm_existing_stages_valid,
+    _confirm_note_valid,
+    _confirm_strategy_valid,
+    _confirmed_text_or_error,
+    _note_cites_new_issues_or_error,
+    _require_prior_strategy_for_confirm,
+    _resolve_completion_strategy,
+    _resolve_confirm_existing_strategy,
+)
+from ._stage_validation_completion_stages import (
+    _auto_confirm_enrich_for_complete,
+    _auto_confirm_organize_for_complete,
+    _require_enrich_stage_for_complete,
+    _require_organize_stage_for_complete,
+    _require_sense_check_stage_for_complete,
+)
+from ._stage_validation_enrich_checks import (
+    _cluster_file_overlaps,
+    _clusters_with_directory_scatter,
+    _clusters_with_high_step_ratio,
+    _enrich_report_or_error,
+    _require_organize_stage_for_enrich,
+    _steps_missing_issue_refs,
+    _steps_referencing_skipped_issues,
+    _steps_with_bad_paths,
+    _steps_with_vague_detail,
+    _steps_without_effort,
+    _underspecified_steps,
+)
 from .confirmations_basic import MIN_ATTESTATION_LEN, validate_attestation
 from .helpers import manual_clusters_with_issues, observe_dimension_breakdown
 from .stage_helpers import unclustered_review_issues, unenriched_clusters
-from ._stage_validation_completion_policy import _completion_clusters_valid
-from ._stage_validation_completion_policy import _completion_strategy_valid
-from ._stage_validation_completion_policy import _confirm_existing_stages_valid
-from ._stage_validation_completion_policy import _confirm_note_valid
-from ._stage_validation_completion_policy import _confirm_strategy_valid
-from ._stage_validation_completion_policy import _confirmed_text_or_error
-from ._stage_validation_completion_policy import _note_cites_new_issues_or_error
-from ._stage_validation_completion_policy import _require_prior_strategy_for_confirm
-from ._stage_validation_completion_policy import _resolve_completion_strategy
-from ._stage_validation_completion_policy import _resolve_confirm_existing_strategy
-from ._stage_validation_completion_stages import _auto_confirm_enrich_for_complete
-from ._stage_validation_completion_stages import _auto_confirm_organize_for_complete
-from ._stage_validation_completion_stages import _require_enrich_stage_for_complete
-from ._stage_validation_completion_stages import _require_organize_stage_for_complete
-from ._stage_validation_completion_stages import _require_sense_check_stage_for_complete
-from ._stage_validation_enrich_checks import _cluster_file_overlaps
-from ._stage_validation_enrich_checks import _clusters_with_directory_scatter
-from ._stage_validation_enrich_checks import _clusters_with_high_step_ratio
-from ._stage_validation_enrich_checks import _enrich_report_or_error
-from ._stage_validation_enrich_checks import _require_organize_stage_for_enrich
-from ._stage_validation_enrich_checks import _steps_missing_issue_refs
-from ._stage_validation_enrich_checks import _steps_referencing_skipped_issues
-from ._stage_validation_enrich_checks import _steps_with_bad_paths
-from ._stage_validation_enrich_checks import _steps_with_vague_detail
-from ._stage_validation_enrich_checks import _steps_without_effort
-from ._stage_validation_enrich_checks import _underspecified_steps
 
 
 def _auto_confirm_stage(
@@ -135,6 +148,58 @@ def _validate_recurring_dimension_mentions(
     return False
 
 
+def _analyze_reflect_issue_accounting(
+    *,
+    report: str,
+    valid_ids: set[str],
+) -> tuple[set[str], list[str], list[str]]:
+    """Return cited, missing, and duplicate issue IDs referenced by reflect."""
+    cited = extract_issue_citations(report, valid_ids)
+    short_id_map: dict[str, str] = {}
+    for issue_id in valid_ids:
+        short_id = issue_id.rsplit("::", 1)[-1]
+        if re.fullmatch(r"[0-9a-f]{8,}", short_id):
+            short_id_map.setdefault(short_id, issue_id)
+    short_hits = Counter(
+        short_id_map[token]
+        for token in re.findall(r"[0-9a-f]{8,}", report)
+        if token in short_id_map
+    )
+    duplicates = sorted(issue_id for issue_id, count in short_hits.items() if count > 1)
+    missing = sorted(valid_ids - cited)
+    return cited, missing, duplicates
+
+
+def _validate_reflect_issue_accounting(
+    *,
+    report: str,
+    valid_ids: set[str],
+) -> tuple[bool, set[str], list[str], list[str]]:
+    """Ensure the reflect blueprint accounts for every open review issue exactly once."""
+    cited, missing, duplicates = _analyze_reflect_issue_accounting(
+        report=report,
+        valid_ids=valid_ids,
+    )
+    if not missing and not duplicates:
+        return True, cited, missing, duplicates
+    print(
+        colorize(
+            "  Reflect report must account for every open review issue exactly once.",
+            "red",
+        )
+    )
+    if missing:
+        missing_short = ", ".join(issue_id.rsplit("::", 1)[-1] for issue_id in missing[:10])
+        print(colorize(f"    Missing: {missing_short}", "yellow"))
+    if duplicates:
+        duplicate_short = ", ".join(
+            issue_id.rsplit("::", 1)[-1] for issue_id in duplicates[:10]
+        )
+        print(colorize(f"    Duplicated: {duplicate_short}", "yellow"))
+    print(colorize("  Fix the reflect blueprint before running organize.", "dim"))
+    return False, cited, missing, duplicates
+
+
 def _require_reflect_stage_for_organize(stages: dict) -> bool:
     if "reflect" in stages:
         return True
@@ -168,6 +233,17 @@ def _auto_confirm_reflect_for_organize(
         runtime_factory = command_runtime_fn or command_runtime
         runtime = runtime_factory(args)
         resolved_triage_input = collect_triage_input_fn(plan, runtime.state)
+
+    valid_ids = set(resolved_triage_input.open_issues.keys())
+    accounting_ok, cited_ids, missing_ids, duplicate_ids = _validate_reflect_issue_accounting(
+        report=str(reflect_stage.get("report", "")),
+        valid_ids=valid_ids,
+    )
+    if not accounting_ok:
+        return False
+    reflect_stage["cited_ids"] = sorted(cited_ids)
+    reflect_stage["missing_issue_ids"] = missing_ids
+    reflect_stage["duplicate_issue_ids"] = duplicate_ids
 
     recurring = detect_recurring_patterns_fn(
         resolved_triage_input.open_issues,
@@ -264,6 +340,7 @@ __all__ = [
     "_clusters_enriched_or_error",
     "_enrich_report_or_error",
     "_unclustered_review_issues_or_error",
+    "_validate_reflect_issue_accounting",
     "_completion_clusters_valid",
     "_completion_strategy_valid",
     "_confirm_existing_stages_valid",
