@@ -213,6 +213,36 @@ def _temporary_skipped_ids(plan: dict) -> list[str]:
     return deferred
 
 
+def _deferred_cluster_breakdown(
+    plan: dict,
+    deferred_ids: list[str],
+) -> tuple[int, int]:
+    deferred_set = set(deferred_ids)
+    if not deferred_set:
+        return 0, 0
+
+    clusters = plan.get("clusters", {})
+    if not isinstance(clusters, dict):
+        return 0, len(deferred_ids)
+
+    covered_by_cluster: set[str] = set()
+    cluster_count = 0
+    for cluster in clusters.values():
+        if not isinstance(cluster, dict):
+            continue
+        issue_ids = cluster.get("issue_ids", [])
+        if not isinstance(issue_ids, list):
+            continue
+        matched = {str(issue_id) for issue_id in issue_ids if str(issue_id) in deferred_set}
+        if not matched:
+            continue
+        cluster_count += 1
+        covered_by_cluster.update(matched)
+
+    individual_count = len(deferred_set - covered_by_cluster)
+    return cluster_count, individual_count
+
+
 def build_deferred_disposition_item(plan: dict) -> WorkQueueItem | None:
     """Build a synthetic item prompting deferred backlog disposition."""
     from desloppify.engine._plan.constants import WORKFLOW_DEFERRED_DISPOSITION_ID
@@ -222,7 +252,9 @@ def build_deferred_disposition_item(plan: dict) -> WorkQueueItem | None:
         return None
 
     count = len(deferred_ids)
-    plural = "item" if count == 1 else "items"
+    cluster_count, individual_count = _deferred_cluster_breakdown(plan, deferred_ids)
+    cluster_label = "cluster" if cluster_count == 1 else "clusters"
+    individual_label = "item" if individual_count == 1 else "items"
     reactivate_cmd = 'desloppify plan unskip "*"'
     wontfix_cmd = (
         'desloppify plan skip --permanent "*" '
@@ -239,11 +271,14 @@ def build_deferred_disposition_item(plan: dict) -> WorkQueueItem | None:
         "file": ".",
         "kind": "workflow_action",
         "summary": (
-            f"Deferred backlog decision required: {count} temporary {plural} "
+            "Deferred backlog decision required: "
+            f"{cluster_count} {cluster_label} + {individual_count} individual {individual_label} "
             "must be reactivated or marked wontfix."
         ),
         "detail": {
             "temporary_skipped_count": count,
+            "deferred_cluster_count": cluster_count,
+            "deferred_individual_count": individual_count,
             "reactivate_command": reactivate_cmd,
             "wontfix_command": wontfix_cmd,
             "decision_options": [

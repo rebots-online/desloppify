@@ -415,6 +415,7 @@ class TestWorkflowRunScanItem:
         assert ids[:2] == ["workflow::deferred-disposition", "workflow::run-scan"]
         deferred = result["items"][0]
         assert deferred["kind"] == "workflow_action"
+        assert "0 clusters + 1 individual item" in deferred["summary"]
         assert deferred["primary_command"] == 'desloppify plan unskip "*"'
 
     def test_deferred_disposition_not_shown_for_permanent_skips(self):

@@ -145,7 +145,30 @@ def test_build_deferred_disposition_item_with_temporary_skips() -> None:
     assert item is not None
     assert item["id"] == WORKFLOW_DEFERRED_DISPOSITION_ID
     assert item["kind"] == "workflow_action"
-    assert "2 temporary items" in item["summary"]
+    assert "0 clusters + 2 individual items" in item["summary"]
     assert item["primary_command"] == 'desloppify plan unskip "*"'
+    assert item["detail"]["deferred_cluster_count"] == 0
+    assert item["detail"]["deferred_individual_count"] == 2
     assert "decision_options" in item["detail"]
     assert len(item["detail"]["decision_options"]) == 2
+
+
+def test_build_deferred_disposition_item_counts_clusters_and_individuals() -> None:
+    item = workflow_mod.build_deferred_disposition_item(
+        {
+            "skipped": {
+                "i1": {"kind": "temporary"},
+                "i2": {"kind": "temporary"},
+                "i3": {"kind": "temporary"},
+            },
+            "clusters": {
+                "auto/a": {"issue_ids": ["i1", "i2"]},
+                "auto/b": {"issue_ids": ["i2"]},
+            },
+        }
+    )
+
+    assert item is not None
+    assert "2 clusters + 1 individual item" in item["summary"]
+    assert item["detail"]["deferred_cluster_count"] == 2
+    assert item["detail"]["deferred_individual_count"] == 1
