@@ -33,7 +33,7 @@ from desloppify.engine._state.noise import (
     resolve_issue_noise_global_budget,
     resolve_issue_noise_settings,
 )
-from desloppify.engine._state.persistence import load_state, save_state
+from desloppify.engine._state.persistence import load_state, save_state, state_lock
 from desloppify.engine._state.resolution import (
     coerce_assessment_score,
     match_issues,
@@ -126,6 +126,7 @@ __all__ = [
     "resolve_issue_noise_settings",
     "resolve_issues",
     "save_state",
+    "state_lock",
     "score_snapshot",
     "suppression_metrics",
     "upsert_issues",

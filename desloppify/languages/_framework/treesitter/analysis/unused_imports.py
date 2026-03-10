@@ -90,11 +90,22 @@ def detect_unused_imports(
 
 
 def _extract_alias(import_node) -> str | None:
-    """Extract alias name from ``use Foo as Bar`` or ``import X as Y``.
+    """Extract alias name from import nodes.
 
-    Walks children of the import node looking for an alias/name node
-    after an ``as`` keyword. Returns the alias text or None.
+    Handles two styles:
+    - Go-style named imports where a ``package_identifier`` child precedes
+      the path with no ``as`` keyword (e.g. ``alias "pkg/path"``).
+    - ``as``-style aliases (Python ``import X as Y``, PHP ``use Foo as Bar``).
+
+    Returns the alias text or None.
     """
+    # Go-style named imports: alias is a package_identifier child.
+    for i in range(import_node.child_count):
+        child = import_node.children[i]
+        if child.type == "package_identifier":
+            return _node_text(child)
+
+    # "as"-style aliases (Python, PHP, etc.)
     found_as = False
     for child in _iter_children(import_node):
         text = _node_text(child)

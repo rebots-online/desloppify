@@ -663,6 +663,65 @@ func main() {
         entries = detect_unused_imports([str(f)], GO_SPEC)
         assert len(entries) == 0
 
+    def test_go_aliased_import_not_false_positive(self, tmp_path):
+        """Go-style aliased imports (alias before path) should use the alias name."""
+        from desloppify.languages._framework.treesitter._specs_compiled import GO_SPEC
+        from desloppify.languages._framework.treesitter._unused_imports import (
+            detect_unused_imports,
+        )
+
+        code = """\
+package main
+
+import (
+    daysailv1 "github.com/anshu/daysail/backend/gen/daysail/v1"
+    "fmt"
+)
+
+func main() {
+    fmt.Println(daysailv1.Something)
+}
+"""
+        f = tmp_path / "main.go"
+        f.write_text(code)
+
+        entries = detect_unused_imports([str(f)], GO_SPEC)
+        names = [e["name"] for e in entries]
+        # The alias "daysailv1" is used — should NOT be flagged.
+        assert "daysailv1" not in names
+        assert "v1" not in names
+        # "fmt" is also used.
+        assert "fmt" not in names
+
+    def test_go_aliased_import_unused(self, tmp_path):
+        """Go-style aliased import that IS unused should be detected."""
+        from desloppify.languages._framework.treesitter._specs_compiled import GO_SPEC
+        from desloppify.languages._framework.treesitter._unused_imports import (
+            detect_unused_imports,
+        )
+
+        code = """\
+package main
+
+import (
+    daysailv1 "github.com/anshu/daysail/backend/gen/daysail/v1"
+    "fmt"
+)
+
+func main() {
+    fmt.Println("hello")
+}
+"""
+        f = tmp_path / "main.go"
+        f.write_text(code)
+
+        entries = detect_unused_imports([str(f)], GO_SPEC)
+        names = [e["name"] for e in entries]
+        # "daysailv1" is NOT used — should be flagged.
+        assert "daysailv1" in names
+        # "fmt" IS used.
+        assert "fmt" not in names
+
     def test_no_import_query_returns_empty(self, tmp_path):
         from desloppify.languages._framework.treesitter import TreeSitterLangSpec
         from desloppify.languages._framework.treesitter._unused_imports import (

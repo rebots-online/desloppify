@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import logging
 import shutil
 import sys
+import time
+from collections.abc import Generator
 from pathlib import Path
 from typing import cast
 
 __all__ = [
     "load_state",
     "save_state",
+    "state_lock",
 ]
 
 from desloppify.base.discovery.file_paths import safe_write_text
@@ -210,3 +215,57 @@ def save_state(
     except OSError as ex:
         print(f"  Warning: Could not save state: {ex}", file=sys.stderr)
         raise
+
+
+@contextlib.contextmanager
+def state_lock(
+    path: Path | None = None,
+    *,
+    timeout: float = 30.0,
+    subjective_integrity_target: float | None = None,
+) -> Generator[StateModel, None, None]:
+    """Context manager that locks the state file for exclusive read-modify-write.
+
+    Acquires an exclusive file lock, reloads state from disk (to pick up the
+    latest version), yields it for mutation, then saves on clean exit.
+
+    Usage::
+
+        with state_lock(state_file) as state:
+            state["issues"]["foo"] = "fixed"
+        # state is saved automatically on clean exit
+    """
+    state_path = path or _default_state_file()
+    lock_path = state_path.with_suffix(".json.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    lock_fd = open(lock_path, "w")  # noqa: SIM115
+    try:
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    lock_fd.close()
+                    raise TimeoutError(
+                        f"Could not acquire state lock within {timeout}s. "
+                        "Another desloppify command may be running."
+                    ) from None
+                time.sleep(0.1)
+
+        # Reload state inside the lock to get the latest version.
+        state = load_state(state_path)
+        yield state
+        save_state(
+            state,
+            state_path,
+            subjective_integrity_target=subjective_integrity_target,
+        )
+    finally:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        lock_fd.close()

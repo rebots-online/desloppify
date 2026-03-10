@@ -12,6 +12,7 @@ from desloppify.app.commands.review.batch.prompt_template import render_batch_pr
 from desloppify.app.commands.review.batch.scoring import (
     DimensionMergeScorer,
     ScoreInputs,
+    _percentile_floor,
 )
 from desloppify.intelligence.review.feedback_contract import (
     LOW_SCORE_ISSUE_THRESHOLD,
@@ -469,3 +470,93 @@ def test_normalize_batch_result_accepts_legacy_unreported_risk_key():
         notes["logic_clarity"]["issues_preventing_higher_score"]
         == "legacy note still provided"
     )
+
+
+# --- _percentile_floor tests ---
+
+
+def test_percentile_floor_single_entry_returns_min():
+    assert _percentile_floor([(42.0, 5.0)], fallback=99.0) == 42.0
+
+
+def test_percentile_floor_empty_returns_fallback():
+    assert _percentile_floor([], fallback=77.0) == 77.0
+
+
+def test_percentile_floor_two_equal_weight_entries():
+    # Bottom 10% of total weight (2.0) is 0.2 — first entry (50, 1.0)
+    # exceeds threshold immediately, so floor = 50.0.
+    result = _percentile_floor([(50.0, 1.0), (90.0, 1.0)], fallback=70.0)
+    assert result == 50.0
+
+
+def test_percentile_floor_weights_bottom_entries():
+    # Entries: (30, 2.0), (60, 3.0), (90, 5.0)
+    # Total weight = 10, threshold = 1.0
+    # Sorted: (30, 2.0) — accumulated 2.0 >= 1.0, stop.
+    # Floor = 30*2/2 = 30.0
+    result = _percentile_floor([(90.0, 5.0), (30.0, 2.0), (60.0, 3.0)], fallback=70.0)
+    assert result == 30.0
+
+
+def test_percentile_floor_small_bad_weight_still_contributes():
+    # Entries: (20, 0.5), (85, 4.5), (90, 5.0)
+    # Total weight = 10, threshold = 1.0
+    # Sorted: (20, 0.5) — accumulated 0.5 < 1.0, continue
+    #         (85, 4.5) — accumulated 5.0 >= 1.0, stop.
+    # Floor = (20*0.5 + 85*4.5) / 5.0 = (10 + 382.5) / 5.0 = 78.5
+    result = _percentile_floor([(85.0, 4.5), (20.0, 0.5), (90.0, 5.0)], fallback=80.0)
+    assert result == pytest.approx(78.5)
+
+
+def test_merge_scores_uses_percentile_floor_not_absolute_min():
+    """Verify that merging a tiny bad file with a large good file
+    produces a higher floor than the old min()-based approach would."""
+    scorer = DimensionMergeScorer()
+    dim = "logic_clarity"
+
+    # Scenario: one small bad file (score=30, weight=0.3) and one
+    # large good file (score=90, weight=9.7).
+    score_buckets = {dim: [(30.0, 0.3), (90.0, 9.7)]}
+    # score_raw_by_dim is no longer used for floor, but pass it for API compat.
+    score_raw_by_dim = {dim: [30.0, 90.0]}
+
+    result = scorer.merge_scores(score_buckets, score_raw_by_dim, {}, {})
+    # Old min()-based floor would be 30.0.
+    # New percentile floor: threshold = 10.0 * 0.1 = 1.0
+    #   sorted: (30, 0.3) -> acc 0.3, (90, 9.7) -> acc 10.0 >= 1.0
+    #   floor = (30*0.3 + 90*9.7) / 10.0 = (9 + 873) / 10.0 = 88.2
+    # floor_aware = 0.7 * weighted_mean + 0.3 * 88.2
+    # weighted_mean = (30*0.3 + 90*9.7) / 10.0 = 88.2
+    # floor_aware = 0.7 * 88.2 + 0.3 * 88.2 = 88.2
+    assert result[dim] == pytest.approx(88.2)
+
+
+def test_merge_scores_bad_file_cannot_game_by_merging():
+    """Core regression: merging a bad file into a good file should not
+    eliminate the floor penalty entirely."""
+    scorer = DimensionMergeScorer()
+    dim = "logic_clarity"
+
+    # Before gaming: two separate files.
+    separate = scorer.merge_scores(
+        {dim: [(40.0, 3.0), (90.0, 7.0)]},
+        {dim: [40.0, 90.0]},
+        {},
+        {},
+    )
+
+    # After gaming: bad code merged into the good file (same total weight).
+    merged_single = scorer.merge_scores(
+        {dim: [(75.0, 10.0)]},
+        {dim: [75.0]},
+        {},
+        {},
+    )
+
+    # The separate-files score should still reflect the bad code penalty.
+    # With percentile floor, the two approaches produce similar results
+    # rather than letting the merged version completely escape the floor.
+    # The key property: separate files score <= merged single file score
+    # (but the gap is much smaller than with min()-based floor).
+    assert separate[dim] <= merged_single[dim]

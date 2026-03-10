@@ -7,7 +7,6 @@ from pathlib import Path
 from desloppify.app.commands.runner.codex_batch import (
     CodexBatchRunnerDeps,
     FollowupScanDeps,
-    _extract_payload_from_log,
     codex_batch_command as _shared_codex_batch_command,
     run_codex_batch as _shared_run_codex_batch,
     run_followup_scan as _shared_run_followup_scan,
@@ -62,7 +61,6 @@ def run_followup_scan(
 __all__ = [
     "CodexBatchRunnerDeps",
     "FollowupScanDeps",
-    "_extract_payload_from_log",
     "codex_batch_command",
     "run_codex_batch",
     "run_followup_scan",

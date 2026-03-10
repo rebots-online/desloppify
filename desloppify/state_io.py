@@ -6,7 +6,7 @@ Use ``desloppify.state_scoring`` for score-only access.
 
 from __future__ import annotations
 
-from desloppify.engine._state.persistence import load_state, save_state
+from desloppify.engine._state.persistence import load_state, save_state, state_lock
 from desloppify.engine._state.schema import (
     CURRENT_VERSION,
     ConcernDismissal,
@@ -43,6 +43,7 @@ __all__ = [
     "load_state",
     "migrate_state_keys",
     "save_state",
+    "state_lock",
     "utc_now",
     "validate_state_invariants",
 ]

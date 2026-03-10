@@ -223,6 +223,23 @@ def _load_or_prepare_packet(
     # check whether a prior ``review --prepare`` left a valid query.json
     # packet we can reuse instead of rebuilding from scratch.
     dims = parse_dimensions(args)
+
+    # Validate explicit dimensions against the language's scored dimensions.
+    if dims:
+        lang_obj = lang
+        lang_name = getattr(lang_obj, "name", None) or str(getattr(lang_obj, "lang", ""))
+        if lang_name:
+            valid_dims = set(scored_dimensions_for_lang(lang_name))
+            if valid_dims:
+                invalid = sorted(dims - valid_dims)
+                if invalid:
+                    valid_list = ", ".join(sorted(valid_dims))
+                    raise CommandError(
+                        f"Invalid dimensions for language '{lang_name}': {', '.join(invalid)}. "
+                        f"Valid dimensions: {valid_list}",
+                        exit_code=1,
+                    )
+
     expected_contract = _build_prepared_packet_contract(args, config=config)
     if not dims:
         prepared, mismatch_reason = _try_load_prepared_packet(
