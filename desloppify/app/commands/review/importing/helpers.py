@@ -226,58 +226,45 @@ def _format_schema_validation_errors(schema_errors: list[str]) -> list[str]:
     return errors
 
 
-def _parse_and_validate_import(
-    import_file: str,
-    *,
-    config: ImportLoadConfig,
-) -> tuple[ReviewImportPayload | None, list[str]]:
-    """Load, parse, and validate a review import file.
-
-    This helper performs filesystem I/O by reading ``import_file`` before
-    normalizing and validating the payload.
-
-    Returns ``(data, errors)`` where *data* is the normalized payload on
-    success, or ``None`` when errors prevent import.
-    """
-    options = config
+def _read_import_payload(import_file: str) -> tuple[dict | list | None, list[str]]:
     issues_path = Path(import_file)
     if not issues_path.exists():
         return None, [f"file not found: {import_file}"]
     try:
-        issues_data = json.loads(issues_path.read_text())
+        return json.loads(issues_path.read_text()), []
     except (json.JSONDecodeError, OSError) as exc:
         return None, [f"error reading issues: {exc}"]
 
+
+def _normalize_import_payload(
+    issues_data: object,
+) -> tuple[ReviewImportPayload | None, list[str]]:
     if isinstance(issues_data, list):
         issues_data = {"issues": issues_data}
-
     if not isinstance(issues_data, dict):
         return None, ["issues file must contain a JSON array or object"]
-
     if "issues" not in issues_data:
         return None, ["issues object must contain a 'issues' key"]
-    normalized_issues_data, shape_errors = _normalize_import_payload_shape(
-        issues_data
-    )
+    normalized_issues_data, shape_errors = _normalize_import_payload_shape(issues_data)
     if shape_errors:
         return None, shape_errors
     if normalized_issues_data is None:
         raise ValueError(
             "normalized import payload missing after successful shape validation"
         )
+    return normalized_issues_data, []
 
-    override_enabled, override_attest = resolve_override_context(
-        manual_override=options.manual_override,
-        manual_attest=options.manual_attest,
-    )
-    flag_errors = _validate_import_mode_flags(
-        options=options,
-        override_enabled=override_enabled,
-    )
-    if flag_errors:
-        return None, flag_errors
+
+def _apply_import_policy(
+    issues_data: ReviewImportPayload,
+    *,
+    import_file: str,
+    options: ImportLoadConfig,
+    override_enabled: bool,
+    override_attest: str | None,
+) -> tuple[ReviewImportPayload | None, list[str]]:
     issues_data, policy_errors = apply_assessment_import_policy(
-        normalized_issues_data,
+        issues_data,
         import_file=import_file,
         attested_external=options.attested_external,
         attested_attest=override_attest,
@@ -292,6 +279,49 @@ def _parse_and_validate_import(
         raise ValueError(
             "assessment import policy returned no payload without reporting errors"
         )
+    return issues_data, []
+
+
+def _parse_and_validate_import(
+    import_file: str,
+    *,
+    config: ImportLoadConfig,
+) -> tuple[ReviewImportPayload | None, list[str]]:
+    """Load, parse, and validate a review import file.
+
+    This helper performs filesystem I/O by reading ``import_file`` before
+    normalizing and validating the payload.
+
+    Returns ``(data, errors)`` where *data* is the normalized payload on
+    success, or ``None`` when errors prevent import.
+    """
+    options = config
+    raw_payload, read_errors = _read_import_payload(import_file)
+    if read_errors:
+        return None, read_errors
+    normalized_issues_data, shape_errors = _normalize_import_payload(raw_payload)
+    if shape_errors:
+        return None, shape_errors
+
+    override_enabled, override_attest = resolve_override_context(
+        manual_override=options.manual_override,
+        manual_attest=options.manual_attest,
+    )
+    flag_errors = _validate_import_mode_flags(
+        options=options,
+        override_enabled=override_enabled,
+    )
+    if flag_errors:
+        return None, flag_errors
+    issues_data, policy_errors = _apply_import_policy(
+        normalized_issues_data,
+        import_file=import_file,
+        options=options,
+        override_enabled=override_enabled,
+        override_attest=override_attest,
+    )
+    if policy_errors:
+        return None, policy_errors
 
     feedback_errors = _validate_assessment_feedback_requirements(
         issues_data=issues_data,
@@ -404,26 +434,27 @@ def _print_assessment_policy_notice_for_mode(
         if reason:
             print(colorize_fn(f"  Reason: {reason}", "dim"))
         return
-    if mode == "issues_only":
-        print(
-            colorize_fn(
-                "  WARNING: untrusted assessment source detected. "
-                f"Imported issues only; skipped {count} assessment score update(s).",
-                "yellow",
-            )
+    if mode != "issues_only":
+        return
+    print(
+        colorize_fn(
+            "  WARNING: untrusted assessment source detected. "
+            f"Imported issues only; skipped {count} assessment score update(s).",
+            "yellow",
         )
-        if reason:
-            print(colorize_fn(f"  Reason: {reason}", "dim"))
-        for message in (
-            "  Assessment scores in state were left unchanged.",
-            "  Happy path: use `desloppify review --run-batches --parallel --scan-after-import`.",
-            "  If you intentionally want manual assessment import, rerun with "
-            f"`desloppify review --import {import_file} --manual-override --attest \"<why this is justified>\"`.",
-            "  Claude cloud path for durable scores: "
-            f"`desloppify review --import {import_file} --attested-external "
-            f"--attest \"{ATTESTED_EXTERNAL_ATTEST_EXAMPLE}\"`",
-        ):
-            print(colorize_fn(message, "dim"))
+    )
+    if reason:
+        print(colorize_fn(f"  Reason: {reason}", "dim"))
+    for message in (
+        "  Assessment scores in state were left unchanged.",
+        "  Happy path: use `desloppify review --run-batches --parallel --scan-after-import`.",
+        "  If you intentionally want manual assessment import, rerun with "
+        f"`desloppify review --import {import_file} --manual-override --attest \"<why this is justified>\"`.",
+        "  Claude cloud path for durable scores: "
+        f"`desloppify review --import {import_file} --attested-external "
+        f"--attest \"{ATTESTED_EXTERNAL_ATTEST_EXAMPLE}\"`",
+    ):
+        print(colorize_fn(message, "dim"))
 
 
 __all__ = [

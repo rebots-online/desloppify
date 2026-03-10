@@ -74,37 +74,25 @@ def _render_subjective_dimension(item: dict, *, explain: bool) -> None:
         print(colorize(f"  explain: {reason}", "dim"))
 
 
-def _render_issue_detail(
-    item: dict, *, single_item: bool = False, header_showed_plan: bool = False,
-) -> dict:
-    """Render plan overrides, file info, and detail fields. Returns parsed detail dict."""
-    plan_description = item.get("plan_description")
-    if plan_description:
-        print(colorize(f"  → {plan_description}", "cyan"))
+def _render_plan_cluster(
+    plan_cluster: dict,
+    *,
+    single_item: bool,
+    header_showed_plan: bool,
+) -> None:
+    cluster_name = plan_cluster.get("name", "")
+    cluster_desc = plan_cluster.get("description") or ""
+    total = plan_cluster.get("total_items", 0)
+    desc_str = f' — "{cluster_desc}"' if cluster_desc else ""
+    print(colorize(f"  Cluster: {cluster_name}{desc_str} ({total} items)", "dim"))
+    steps = plan_cluster.get("action_steps") or []
+    if steps and single_item and not header_showed_plan:
+        print(colorize("\n  Steps:", "dim"))
+        for idx, step in enumerate(steps, 1):
+            print(colorize(f"    {idx}. {_step_text(step)}", "dim"))
 
-    plan_cluster = item.get("plan_cluster")
-    if isinstance(plan_cluster, dict):
-        cluster_name = plan_cluster.get("name", "")
-        cluster_desc = plan_cluster.get("description") or ""
-        total = plan_cluster.get("total_items", 0)
-        desc_str = f' — "{cluster_desc}"' if cluster_desc else ""
-        print(colorize(f"  Cluster: {cluster_name}{desc_str} ({total} items)", "dim"))
-        steps = plan_cluster.get("action_steps") or []
-        if steps and single_item and not header_showed_plan:
-            print(colorize("\n  Steps:", "dim"))
-            for idx, step in enumerate(steps, 1):
-                print(colorize(f"    {idx}. {_step_text(step)}", "dim"))
 
-    plan_note = item.get("plan_note")
-    if plan_note:
-        print(colorize(f"  Note: {plan_note}", "dim"))
-
-    file_val = item.get("file", "")
-    if file_val and file_val != ".":
-        print(f"  File: {file_val}")
-    print(colorize(f"  ID:   {item.get('id', '')}", "dim"))
-
-    # Normalize detail payload
+def _normalize_item_detail(item: dict) -> dict:
     raw_detail = item.get("detail", {})
     if isinstance(raw_detail, str):
         raw_detail = {"suggestion": raw_detail}
@@ -114,8 +102,10 @@ def _render_issue_detail(
     detail.setdefault("category", None)
     detail.setdefault("importers", None)
     detail.setdefault("count", 0)
+    return detail
 
-    # Detail fields
+
+def _render_detail_fields(detail: dict) -> None:
     lines = detail.get("lines")
     if lines:
         print(f"  Lines: {', '.join(str(line_no) for line_no in lines[:8])}")
@@ -129,14 +119,46 @@ def _render_issue_detail(
     if suggestion:
         print(colorize(f"\n  Suggestion: {suggestion}", "dim"))
 
-    # Code snippet
+
+def _render_detail_snippet(item: dict, detail: dict) -> None:
     target_line = detail.get("line") or (detail.get("lines", [None]) or [None])[0]
     file_path = item.get("file")
-    if target_line and file_path not in (".", ""):
-        snippet = read_code_snippet(file_path, target_line)
-        if snippet:
-            print(colorize("\n  Code:", "dim"))
-            print(snippet)
+    if not target_line or file_path in (".", ""):
+        return
+    snippet = read_code_snippet(file_path, target_line)
+    if snippet:
+        print(colorize("\n  Code:", "dim"))
+        print(snippet)
+
+
+def _render_issue_detail(
+    item: dict, *, single_item: bool = False, header_showed_plan: bool = False,
+) -> dict:
+    """Render plan overrides, file info, and detail fields. Returns parsed detail dict."""
+    plan_description = item.get("plan_description")
+    if plan_description:
+        print(colorize(f"  → {plan_description}", "cyan"))
+
+    plan_cluster = item.get("plan_cluster")
+    if isinstance(plan_cluster, dict):
+        _render_plan_cluster(
+            plan_cluster,
+            single_item=single_item,
+            header_showed_plan=header_showed_plan,
+        )
+
+    plan_note = item.get("plan_note")
+    if plan_note:
+        print(colorize(f"  Note: {plan_note}", "dim"))
+
+    file_val = item.get("file", "")
+    if file_val and file_val != ".":
+        print(f"  File: {file_val}")
+    print(colorize(f"  ID:   {item.get('id', '')}", "dim"))
+
+    detail = _normalize_item_detail(item)
+    _render_detail_fields(detail)
+    _render_detail_snippet(item, detail)
 
     return detail
 
@@ -248,6 +270,60 @@ def _item_label(item: dict, idx: int, total: int) -> str:
     return f"  Next item{pos_str}"
 
 
+def _render_cluster_drill_header(
+    *,
+    plan: dict,
+    effective_cluster: str,
+    items: list[dict],
+) -> bool:
+    cluster_data = plan.get("clusters", {}).get(effective_cluster, {})
+    total = len(cluster_data.get("issue_ids", []))
+    desc = cluster_data.get("description") or ""
+    print(colorize(f"\n  ┌─ Cluster: {effective_cluster} ({len(items)} of {total} remaining) ─┐", "cyan"))
+    if desc:
+        print(colorize(f"  │ {desc}", "cyan"))
+    steps = cluster_data.get("action_steps") or []
+    if steps:
+        print(colorize("  │", "cyan"))
+        print(colorize("  │ Action plan:", "cyan"))
+        for idx, step in enumerate(steps, 1):
+            print(colorize(f"  │   {idx}. {_step_text(step)}", "cyan"))
+    print(colorize("  └" + "─" * 60 + "┘", "cyan"))
+    print(colorize("  Back to full queue: desloppify next", "dim"))
+    if steps:
+        print(colorize(f"  Mark step done: desloppify plan cluster update {effective_cluster} --done-step N", "dim"))
+    return bool(steps)
+
+
+def _render_item_list(
+    items: list[dict],
+    *,
+    dim_scores: dict,
+    issues_scoped: dict,
+    explain: bool,
+    potentials: dict | None,
+    effective_cluster: str | None,
+    header_showed_plan: bool,
+) -> None:
+    is_cluster_drill = len(items) > 1 and bool(effective_cluster)
+    for idx, item in enumerate(items):
+        if idx > 0:
+            print()
+        if is_cluster_drill and idx > 0:
+            _render_compact_item(item, idx, len(items))
+            continue
+        print(colorize(_item_label(item, idx, len(items)), "bold"))
+        _render_item(
+            item,
+            dim_scores,
+            issues_scoped,
+            explain=explain,
+            potentials=potentials,
+            single_item=len(items) == 1,
+            header_showed_plan=header_showed_plan,
+        )
+
+
 def render_terminal_items(
     items: list[dict],
     dim_scores: dict,
@@ -259,49 +335,28 @@ def render_terminal_items(
     plan: dict | None = None,
     cluster_filter: str | None = None,
 ) -> None:
-    # Cluster drill-in header
     header_showed_plan = False
     effective_cluster = cluster_filter or (plan and plan.get("active_cluster"))
     if effective_cluster and plan:
-        cluster_name = effective_cluster
-        clusters = plan.get("clusters", {})
-        cluster_data = clusters.get(cluster_name, {})
-        total = len(cluster_data.get("issue_ids", []))
-        desc = cluster_data.get("description") or ""
-        print(colorize(f"\n  ┌─ Cluster: {cluster_name} ({len(items)} of {total} remaining) ─┐", "cyan"))
-        if desc:
-            print(colorize(f"  │ {desc}", "cyan"))
-        steps = cluster_data.get("action_steps") or []
-        if steps:
-            print(colorize("  │", "cyan"))
-            print(colorize("  │ Action plan:", "cyan"))
-            for idx, step in enumerate(steps, 1):
-                print(colorize(f"  │   {idx}. {_step_text(step)}", "cyan"))
-        print(colorize("  └" + "─" * 60 + "┘", "cyan"))
-        print(colorize("  Back to full queue: desloppify next", "dim"))
-        if steps:
-            print(colorize(f"  Mark step done: desloppify plan cluster update {cluster_name} --done-step N", "dim"))
-        header_showed_plan = True
+        header_showed_plan = _render_cluster_drill_header(
+            plan=plan,
+            effective_cluster=effective_cluster,
+            items=items,
+        )
 
     if group != "item":
         _render_grouped(items, group)
         return
 
-    is_cluster_drill = len(items) > 1 and bool(effective_cluster)
-
-    for idx, item in enumerate(items):
-        if idx > 0:
-            print()
-        if is_cluster_drill and idx > 0:
-            _render_compact_item(item, idx, len(items))
-            continue
-        label = _item_label(item, idx, len(items))
-        print(colorize(label, "bold"))
-        _render_item(
-            item, dim_scores, issues_scoped, explain=explain, potentials=potentials,
-            single_item=len(items) == 1,
-            header_showed_plan=header_showed_plan,
-        )
+    _render_item_list(
+        items,
+        dim_scores=dim_scores,
+        issues_scoped=issues_scoped,
+        explain=explain,
+        potentials=potentials,
+        effective_cluster=effective_cluster,
+        header_showed_plan=header_showed_plan,
+    )
 
 
 __all__ = [
