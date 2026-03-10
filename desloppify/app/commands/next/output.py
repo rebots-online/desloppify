@@ -115,20 +115,30 @@ def build_query_payload(
 ) -> dict[str, Any]:
     """Build JSON payload for query.json and non-terminal output modes."""
     serialized = [serialize_item(item) for item in items]
+    mode = "execution" if command == "next" else command
     queue_section: dict[str, Any] = {
         "total": queue.get("total", len(items)),
+        "mode": mode,
     }
+
+    agent_notes = [
+        "Do NOT use `desloppify plan skip` unless the user explicitly asks you to skip an item.",
+        "If you cannot fix an item, report it and move to the next one.",
+        "For cluster items: if the autofix_hint finds 0 results, drill into individual issues with the primary_command.",
+    ]
+    if command == "backlog":
+        agent_notes = [
+            "This is backlog discovery, not the active execution queue.",
+            "Use `desloppify next` for the current execution item.",
+            "Do NOT treat backlog rank as permission to bypass the living plan.",
+        ]
 
     payload: dict[str, Any] = {
         "command": command,
         "items": serialized,
         "queue": queue_section,
         "narrative": narrative,
-        "agent_notes": [
-            "Do NOT use `desloppify plan skip` unless the user explicitly asks you to skip an item.",
-            "If you cannot fix an item, report it and move to the next one.",
-            "For cluster items: if the autofix_hint finds 0 results, drill into individual issues with the primary_command.",
-        ],
+        "agent_notes": agent_notes,
     }
 
     if plan and (

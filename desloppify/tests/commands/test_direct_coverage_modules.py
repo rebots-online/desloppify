@@ -410,6 +410,7 @@ def test_build_query_payload_structure():
     assert payload["command"] == "next"
     assert len(payload["items"]) == 1
     assert payload["queue"]["total"] == 1
+    assert payload["queue"]["mode"] == "execution"
     assert payload["narrative"] is None
 
 

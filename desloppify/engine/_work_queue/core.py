@@ -80,6 +80,7 @@ class QueueBuildOptions:
     plan: dict | None = None
     include_skipped: bool = False
     planned_only: bool = False
+    exclude_plan_tracked: bool = False
 
     # Pre-computed context (overrides plan)
     context: QueueContext | None = None
@@ -119,7 +120,12 @@ def build_work_queue(
     )
     items += _gather_subjective_items(state, opts, threshold)
     items += _gather_workflow_items(state, plan, status)
-    items = _filter_planned_items(items, plan, planned_only=opts.planned_only)
+    items = _filter_plan_visibility(
+        items,
+        plan,
+        planned_only=opts.planned_only,
+        exclude_plan_tracked=opts.exclude_plan_tracked,
+    )
 
     # 2. Score
     enrich_with_impact(items, state.get("dimension_scores", {}))
@@ -241,19 +247,24 @@ def _planned_item_ids(plan: dict) -> set[str]:
     return tracked_ids
 
 
-def _filter_planned_items(
+def _filter_plan_visibility(
     items: list[WorkQueueItem],
     plan: dict | None,
     *,
     planned_only: bool,
+    exclude_plan_tracked: bool,
 ) -> list[WorkQueueItem]:
-    """Restrict queue execution to IDs explicitly tracked by the plan."""
-    if not planned_only or not plan:
+    """Apply plan-based visibility filtering for execution/backlog surfaces."""
+    if not plan:
         return items
     tracked_ids = _planned_item_ids(plan)
     if not tracked_ids:
-        return []
-    return [item for item in items if item["id"] in tracked_ids]
+        return [] if planned_only else items
+    if planned_only:
+        return [item for item in items if item["id"] in tracked_ids]
+    if exclude_plan_tracked:
+        return [item for item in items if item["id"] not in tracked_ids]
+    return items
 
 
 

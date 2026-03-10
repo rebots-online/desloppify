@@ -22,6 +22,7 @@ from desloppify.base.enums import issue_status_tokens
 _STATUS_CHOICES = sorted(issue_status_tokens(include_all=True))
 
 __all__ = [
+    "_add_backlog_parser",
     "_add_config_parser",
     "_add_detect_parser",
     "_add_dev_parser",
@@ -253,6 +254,59 @@ examples:
         help="Include skipped items in the queue",
     )
     p_next.add_argument(
+        "--output",
+        type=str,
+        metavar="FILE",
+        help="Write JSON/Markdown to file (with --format json|md)",
+    )
+
+
+def _add_backlog_parser(sub) -> None:
+    p_backlog = sub.add_parser(
+        "backlog",
+        help="Show broader backlog items not currently driving execution",
+        epilog="""\
+examples:
+  desloppify backlog                    # top backlog item
+  desloppify backlog --count 20         # top 20 backlog items
+  desloppify backlog --group detector   # group by detector
+  desloppify backlog --scope security   # narrow backlog view""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_backlog.add_argument("--state", type=str, default=None, help="Path to state file")
+    p_backlog.add_argument(
+        "--count", type=int, default=1, help="Number of items to show (default: 1)"
+    )
+    p_backlog.add_argument(
+        "--scope",
+        type=str,
+        default=None,
+        help="Optional scope filter (path, detector, ID prefix, or glob)",
+    )
+    p_backlog.add_argument(
+        "--status",
+        choices=_STATUS_CHOICES,
+        default="open",
+        help="Status filter for backlog items (default: open)",
+    )
+    p_backlog.add_argument(
+        "--group",
+        choices=["item", "file", "detector"],
+        default="item",
+        help="Group output by item, file, or detector",
+    )
+    p_backlog.add_argument(
+        "--format",
+        choices=["terminal", "json", "md"],
+        default="terminal",
+        help="Output format (default: terminal)",
+    )
+    p_backlog.add_argument(
+        "--explain",
+        action="store_true",
+        help="Show ranking rationale",
+    )
+    p_backlog.add_argument(
         "--output",
         type=str,
         metavar="FILE",

@@ -48,8 +48,9 @@ def _print_review_import_sync(
         "dim",
     ))
     print()
-    print(colorize("  View queue:            desloppify plan queue", "dim"))
+    print(colorize("  View execution queue:  desloppify plan queue", "dim"))
     print(colorize("  View newest first:     desloppify plan queue --sort recent", "dim"))
+    print(colorize("  View broader backlog:  desloppify backlog", "dim"))
     print()
     print(colorize("  NEXT STEP:", "yellow"))
     print(colorize("    Run:    desloppify next", "yellow"))

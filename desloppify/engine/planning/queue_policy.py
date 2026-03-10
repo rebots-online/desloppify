@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from desloppify.base.config import DEFAULT_TARGET_STRICT_SCORE
 from desloppify.engine._state.schema import StateModel
@@ -32,6 +32,18 @@ class OpenPlanQueuePolicy:
     include_subjective: bool = True
 
 
+def _queue_shaping_plan_present(plan: dict | None) -> bool:
+    if not isinstance(plan, dict):
+        return False
+    return bool(plan.get("queue_order") or plan.get("overrides") or plan.get("clusters"))
+
+
+def _queue_plan_from_options(options: QueueBuildOptions) -> dict | None:
+    if options.context is not None:
+        return options.context.plan
+    return options.plan
+
+
 def build_open_plan_queue(
     state: StateModel,
     policy: OpenPlanQueuePolicy | None = None,
@@ -55,4 +67,39 @@ def build_open_plan_queue(
     )
 
 
-__all__ = ["OpenPlanQueuePolicy", "build_open_plan_queue"]
+def build_execution_queue(
+    state: StateModel,
+    *,
+    options: QueueBuildOptions | None = None,
+) -> WorkQueueResult:
+    """Build the execution queue that follows the living plan when present."""
+    options = options or QueueBuildOptions()
+    if not _queue_shaping_plan_present(_queue_plan_from_options(options)):
+        return build_work_queue(state, options=options)
+    return build_work_queue(
+        state,
+        options=replace(options, planned_only=True),
+    )
+
+
+def build_backlog_queue(
+    state: StateModel,
+    *,
+    options: QueueBuildOptions | None = None,
+) -> WorkQueueResult:
+    """Build the broader backlog, excluding work already tracked in the plan."""
+    options = options or QueueBuildOptions()
+    if not _queue_shaping_plan_present(_queue_plan_from_options(options)):
+        return build_work_queue(state, options=options)
+    return build_work_queue(
+        state,
+        options=replace(options, exclude_plan_tracked=True),
+    )
+
+
+__all__ = [
+    "OpenPlanQueuePolicy",
+    "build_backlog_queue",
+    "build_execution_queue",
+    "build_open_plan_queue",
+]

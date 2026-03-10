@@ -12,12 +12,15 @@ from desloppify.app.commands.helpers.state import require_completed_scan
 from desloppify.app.skill_docs import check_skill_version
 from desloppify.base.output.terminal import colorize
 from desloppify.base.tooling import check_config_staleness
-from desloppify.engine._work_queue.core import build_work_queue
 from desloppify.engine.plan_state import load_plan
+from desloppify.engine.planning.queue_policy import build_execution_queue
 
 from .options import NextOptions
 from .queue_flow import build_and_render_queue
 from .subjective import _low_subjective_dimensions
+
+# Backward-compatible test seam: `next` now uses the execution queue wrapper.
+build_work_queue = build_execution_queue
 
 
 def cmd_next(args: argparse.Namespace) -> None:
@@ -52,6 +55,7 @@ __all__ = [
     "NextOptions",
     "_low_subjective_dimensions",
     "build_work_queue",
+    "build_execution_queue",
     "cmd_next",
     "load_plan",
     "resolve_lang",

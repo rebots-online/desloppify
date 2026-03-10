@@ -249,3 +249,71 @@ def test_build_and_render_queue_uses_plan_tracked_mode_when_plan_exists(monkeypa
     )
 
     assert captured["planned_only"] is True
+
+
+def test_build_and_render_queue_backlog_mode_hides_plan_prompt(monkeypatch) -> None:
+    written: list[dict] = []
+    user_messages: list[str] = []
+    monkeypatch.setattr(queue_flow_mod, "triage_guardrail_messages", lambda **_k: [])
+    monkeypatch.setattr(queue_flow_mod, "target_strict_score_from_config", lambda _cfg: 95.0)
+    monkeypatch.setattr(queue_flow_mod, "queue_context", lambda *_a, **_k: SimpleNamespace())
+    monkeypatch.setattr(queue_flow_mod, "_resolve_cluster_focus", lambda *_a, **_k: None)
+    monkeypatch.setattr(queue_flow_mod, "_render_queue_header", lambda *_a, **_k: None)
+    monkeypatch.setattr(queue_flow_mod, "_show_empty_queue", lambda *_a, **_k: False)
+    monkeypatch.setattr(queue_flow_mod, "compute_narrative", lambda *_a, **_k: {"narrative": 1})
+    monkeypatch.setattr(
+        queue_flow_mod.state_mod,
+        "score_snapshot",
+        lambda _state: SimpleNamespace(strict=88.0),
+    )
+    monkeypatch.setattr(
+        queue_flow_mod.state_mod,
+        "path_scoped_issues",
+        lambda issues, _scan_path: issues,
+    )
+    monkeypatch.setattr(
+        queue_flow_mod.next_render_mod,
+        "render_terminal_items",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        queue_flow_mod.next_nudges_mod,
+        "render_single_item_resolution_hint",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        queue_flow_mod.next_nudges_mod,
+        "render_uncommitted_reminder",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("plan reminder should be hidden")),
+    )
+    monkeypatch.setattr(
+        queue_flow_mod.next_nudges_mod,
+        "render_followup_nudges",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("plan nudges should be hidden")),
+    )
+    monkeypatch.setattr(queue_flow_mod, "print_user_message", lambda msg: user_messages.append(msg))
+    monkeypatch.setattr(
+        queue_flow_mod,
+        "_emit_requested_output",
+        lambda *_a, **_k: False,
+    )
+
+    queue_flow_mod.build_and_render_queue(
+        _args(),
+        state={"issues": {"x": {}}, "dimension_scores": {}, "scan_path": "."},
+        config={},
+        resolve_lang_fn=lambda _args: SimpleNamespace(name="python"),
+        load_plan_fn=lambda: {"queue_order": ["smells::a.py::planned"]},
+        build_work_queue_fn=lambda *_a, **_k: {
+            "items": [{"id": "smells::b.py::unplanned", "detector": "smells"}],
+            "total": 1,
+        },
+        write_query_fn=lambda payload: written.append(payload),
+        command_name="backlog",
+        show_plan_context=False,
+        collapse_plan_clusters=False,
+        show_execution_prompt=False,
+    )
+
+    assert written and written[0]["command"] == "backlog"
+    assert not user_messages

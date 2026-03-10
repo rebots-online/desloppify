@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from desloppify.engine.planning.queue_policy import build_backlog_queue
 from desloppify.engine._work_queue.core import QueueBuildOptions
 from desloppify.engine._work_queue.core import build_work_queue as _build_work_queue
 
@@ -279,6 +280,31 @@ def test_planned_only_queue_hides_unplanned_state_issues():
     )
     ids = [item["id"] for item in queue["items"]]
     assert ids == ["smells::src/a.py::planned"]
+
+
+def test_backlog_queue_excludes_plan_tracked_items():
+    """Backlog view should exclude work already tracked in the execution plan."""
+    from desloppify.engine._plan.schema import empty_plan
+
+    state = _state(
+        [
+            _issue("smells::src/a.py::planned", detector="smells"),
+            _issue("smells::src/b.py::unplanned", detector="smells"),
+        ]
+    )
+    plan = empty_plan()
+    plan["queue_order"] = ["smells::src/a.py::planned"]
+
+    queue = build_backlog_queue(
+        state,
+        options=QueueBuildOptions(
+            count=None,
+            include_subjective=False,
+            plan=plan,
+        ),
+    )
+    ids = [item["id"] for item in queue["items"]]
+    assert ids == ["smells::src/b.py::unplanned"]
 
 
 # ── Lifecycle filter runs after plan_presort ───────────

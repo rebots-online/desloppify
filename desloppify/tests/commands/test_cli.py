@@ -146,6 +146,11 @@ class TestCreateParser:
         assert args.command == "next"
         assert args.count == 1
 
+    def test_backlog_command(self, parser):
+        args = parser.parse_args(["backlog"])
+        assert args.command == "backlog"
+        assert args.count == 1
+
     def test_next_with_scope_status_group_and_format(self, parser):
         args = parser.parse_args(
             [
@@ -832,4 +837,3 @@ class TestResolveLang:
         args = SimpleNamespace(path=str(target_src))
         resolved = lang_helpers_mod.resolve_detection_root(args)
         assert resolved == target_root
-

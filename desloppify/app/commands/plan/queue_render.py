@@ -14,13 +14,13 @@ from desloppify.app.commands.helpers.state import require_completed_scan
 from desloppify.base.output.terminal import colorize, print_table
 from desloppify.engine._work_queue.core import (
     QueueBuildOptions,
-    build_work_queue,
 )
 from desloppify.engine._work_queue.plan_order import (
     collapse_clusters,
     filter_cluster_focus,
 )
 from desloppify.engine.plan_state import load_plan
+from desloppify.engine.planning.queue_policy import build_execution_queue
 from desloppify.engine.plan_queue import compute_new_issue_ids
 
 
@@ -194,7 +194,7 @@ def _build_queue_items(
     effective_cluster: str | None,
 ) -> tuple[list[dict], dict]:
     """Build queue items with focus/collapse view transforms applied."""
-    queue = build_work_queue(
+    queue = build_execution_queue(
         state,
         options=QueueBuildOptions(
             count=None,

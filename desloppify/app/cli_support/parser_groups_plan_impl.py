@@ -34,7 +34,7 @@ Run with no subcommand to generate a full prioritized markdown plan.""",
 typical workflow:
   desloppify scan                       # detect issues
   desloppify plan                       # full prioritized markdown
-  desloppify plan queue                 # compact table of all items
+  desloppify plan queue                 # compact table of execution items
   desloppify plan cluster create ...    # group related issues
   desloppify plan focus <cluster>       # narrow scope
   desloppify next                       # work on the next item
@@ -47,7 +47,7 @@ patterns (used by reorder, skip, resolve, describe, note, etc.):
 
 subcommands:
   show       Show plan metadata summary
-  queue      Compact table of upcoming queue items
+  queue      Compact table of execution queue items
   reset      Reset plan to empty
   reorder    Reposition issues or clusters in the queue
   resolve    Mark issues as fixed (score movement + next-step)
