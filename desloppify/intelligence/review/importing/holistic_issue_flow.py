@@ -107,7 +107,7 @@ def validate_and_build_issues(
         content_hash = hashlib.sha256(summary_text.encode()).hexdigest()[:8]
         detail: dict[str, Any] = {
             "holistic": True,
-            "content_hash": content_hash,
+            "summary_hash": content_hash,
             "dimension": dimension,
             "related_files": issue["related_files"],
             "evidence": issue["evidence"],

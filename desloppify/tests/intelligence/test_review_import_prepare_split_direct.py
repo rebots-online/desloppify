@@ -126,6 +126,8 @@ def test_issue_flow_build_collect_and_auto_resolve_paths(monkeypatch) -> None:
     assert len(issues) == 1
     assert skipped == []
     assert dismissed and dismissed[0]["fingerprint"] == "fp2"
+    assert issues[0]["detail"]["summary_hash"]
+    assert "content_hash" not in issues[0]["detail"]
 
     imported = issue_flow_mod.collect_imported_dimensions(
         issues_list=[{"dimension": "Naming Quality"}],
