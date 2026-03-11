@@ -48,7 +48,7 @@ def _print_runner_paths(
 
 def print_dashboard_header(si: object, stages: dict, meta: dict, plan: dict) -> None:
     """Print the header section: title, open issues count, stage progress, overall status."""
-    print(colorize("  Epic triage", "bold"))
+    print(colorize("  Cluster triage", "bold"))
     print(colorize("  " + "─" * 60, "dim"))
     print(f"  Open review issues: {len(si.open_issues)}")
     print(colorize("  Goal: identify contradictions, resolve them, then group the coherent", "cyan"))
@@ -57,8 +57,9 @@ def print_dashboard_header(si: object, stages: dict, meta: dict, plan: dict) -> 
     print(colorize(f"    Codex:  {TRIAGE_CMD_RUN_STAGES_CODEX}", "dim"))
     print(colorize(f"    Claude: {TRIAGE_CMD_RUN_STAGES_CLAUDE}", "dim"))
     print(colorize("  Manual stage commands below are fallback/debug paths.", "dim"))
-    if si.existing_epics:
-        print(f"  Existing clusters: {len(si.existing_epics)}")
+    existing_clusters = getattr(si, "existing_clusters", getattr(si, "existing_epics", {}))
+    if existing_clusters:
+        print(f"  Existing clusters: {len(existing_clusters)}")
     if si.new_since_last:
         print(colorize(f"  New since last triage: {len(si.new_since_last)}", "yellow"))
         for fid in sorted(si.new_since_last):

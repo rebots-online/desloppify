@@ -1,4 +1,4 @@
-"""Parsing helpers for epic triage output."""
+"""Parsing helpers for cluster triage output."""
 
 from __future__ import annotations
 
@@ -91,12 +91,13 @@ def _parse_action_steps(raw_steps: object) -> list[dict]:
 def parse_triage_result(raw: dict, valid_ids: set[str]) -> TriageResult:
     """Parse and validate raw LLM output into a TriageResult.
 
-    Invalid issue IDs are silently dropped from epics and dismissals.
+    Invalid issue IDs are silently dropped from clusters and dismissals.
     """
     strategy_summary = str(raw.get("strategy_summary", ""))
 
     epics: list[dict] = []
-    for raw_epic in raw.get("epics", []):
+    raw_clusters = raw.get("clusters", raw.get("epics", []))
+    for raw_epic in raw_clusters:
         if not isinstance(raw_epic, dict):
             continue
         name = str(raw_epic.get("name", "")).strip()

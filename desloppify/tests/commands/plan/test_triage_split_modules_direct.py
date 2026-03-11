@@ -349,7 +349,7 @@ def test_display_layout_renderers(monkeypatch, capsys) -> None:
     display_layout_mod.show_plan_summary(plan, state)
 
     out = capsys.readouterr().out
-    assert "Epic triage" in out
+    assert "Cluster triage" in out
     assert "stage-progress" in out
     assert "Review issues by dimension" in out
     assert "Coverage:" in out

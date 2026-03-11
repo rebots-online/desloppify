@@ -14,10 +14,11 @@ from desloppify.engine.detectors.review_coverage import (
 )
 from desloppify.engine.detectors.security.detector import detect_security_issues
 from desloppify.engine.detectors.test_coverage.detector import detect_test_coverage
+from desloppify.engine._state.filtering import make_issue
 from desloppify.engine.policy.zones import EXCLUDED_ZONES, filter_entries
 from desloppify.languages._framework.base.types import LangRuntimeContract
 from desloppify.languages._framework.issue_factories import make_dupe_issues
-from desloppify.state import Issue, make_issue
+from desloppify.state_io import Issue
 
 from .shared_phases_helpers import (
     _entries_to_issues,
