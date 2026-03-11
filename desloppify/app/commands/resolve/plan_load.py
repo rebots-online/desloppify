@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from desloppify.base.output.terminal import colorize
 
-_warned_degraded_mode = False
+_DEGRADED_PLAN_WARNING_STATE = {"warned": False}
 
 
 @dataclass(frozen=True)
@@ -28,10 +28,9 @@ def warn_plan_load_degraded_once(
 
     Returns a structured warning payload on first emission, else ``None``.
     """
-    global _warned_degraded_mode
-    if _warned_degraded_mode:
+    if _DEGRADED_PLAN_WARNING_STATE["warned"]:
         return None
-    _warned_degraded_mode = True
+    _DEGRADED_PLAN_WARNING_STATE["warned"] = True
 
     detail = f" ({error_kind})" if error_kind else ""
     message = (
@@ -56,8 +55,7 @@ def warn_plan_load_degraded_once(
 
 def _reset_degraded_plan_warning_for_tests() -> None:
     """Test helper to reset warning dedupe state."""
-    global _warned_degraded_mode
-    _warned_degraded_mode = False
+    _DEGRADED_PLAN_WARNING_STATE["warned"] = False
 
 
 __all__ = [

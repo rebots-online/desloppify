@@ -50,6 +50,173 @@ class EnrichStageDeps:
     auto_confirm_organize_for_complete: Callable[..., bool] | None = None
 
 
+def _resolve_enrich_stage_context(
+    *,
+    args: argparse.Namespace,
+    services: TriageServices | None,
+    deps: EnrichStageDeps,
+) -> tuple[TriageServices, dict, dict, dict, str | None, str | None]:
+    report: str | None = getattr(args, "report", None)
+    attestation: str | None = getattr(args, "attestation", None)
+    resolved_services = services or deps.default_triage_services()
+    plan = resolved_services.load_plan()
+    state = resolved_services.command_runtime(args).state
+    meta = plan.get("epic_triage_meta", {})
+    stages = meta.get("triage_stages", {})
+    return resolved_services, plan, state, stages, report, attestation
+
+
+def _require_confirmed_organize_stage(
+    *,
+    plan: dict,
+    stages: dict,
+    attestation: str | None,
+    services: TriageServices,
+    deps: EnrichStageDeps,
+) -> bool:
+    if stages.get("organize", {}).get("confirmed_at"):
+        return True
+    if not attestation:
+        print(deps.colorize("  Cannot enrich: organize stage not confirmed.", "red"))
+        print(deps.colorize("  Run: desloppify plan triage --confirm organize", "dim"))
+        print(deps.colorize("  Or pass --attestation to auto-confirm organize inline.", "dim"))
+        return False
+
+    auto_confirm_organize_for_complete = deps.auto_confirm_organize_for_complete
+    if auto_confirm_organize_for_complete is None:
+        from .validation.completion_stages import _auto_confirm_stage_for_complete
+
+        auto_confirm_organize_for_complete = _auto_confirm_stage_for_complete
+    return auto_confirm_organize_for_complete(
+        plan=plan,
+        stages=stages,
+        stage="organize",
+        attestation=attestation,
+        save_plan_fn=services.save_plan,
+    )
+
+
+def _require_cluster_update_activity(
+    *,
+    plan: dict,
+    state: dict,
+    stages: dict,
+    attestation: str | None,
+    deps: EnrichStageDeps,
+) -> bool:
+    organize_ts = stages.get("organize", {}).get("timestamp", "")
+    if not organize_ts:
+        return True
+    activity = deps.count_log_activity_since(plan, organize_ts)
+    update_ops = activity.get("cluster_update", 0)
+    if update_ops != 0 or not open_review_ids_from_state(state):
+        return True
+    if attestation and len(attestation.strip()) >= 40:
+        print(
+            deps.colorize(
+                "  Note: 0 cluster_update ops logged since organize. "
+                "Proceeding with attestation override.",
+                "yellow",
+            )
+        )
+        return True
+    print(
+        deps.colorize(
+            "  Cannot enrich: no cluster_update operations logged since organize.",
+            "red",
+        )
+    )
+    print(
+        deps.colorize(
+            "  Enriching steps requires running cluster update commands.\n"
+            '  e.g. desloppify plan cluster update <name> --update-step N --detail "..."',
+            "dim",
+        )
+    )
+    print(
+        deps.colorize(
+            '  Override: pass --attestation "reason why no update ops" (40+ chars).',
+            "dim",
+        )
+    )
+    return False
+
+
+def _print_underspecified_step_error(
+    underspec: list[tuple[str, int, int]],
+    *,
+    deps: EnrichStageDeps,
+) -> None:
+    total_bare = sum(n for _, n, _ in underspec)
+    print(
+        deps.colorize(
+            f"  Cannot enrich: {total_bare} step(s) across {len(underspec)} cluster(s) lack detail or issue_refs:",
+            "red",
+        )
+    )
+    for name, bare, total in underspec:
+        print(deps.colorize(f"    {name}: {bare}/{total} steps need enrichment", "yellow"))
+    print()
+    print(
+        deps.colorize(
+            "  Every step needs --detail (sub-points) or --issue-refs (for auto-completion).",
+            "dim",
+        )
+    )
+    print(deps.colorize("  Fix:", "dim"))
+    print(
+        deps.colorize(
+            '    desloppify plan cluster update <name> --update-step N --detail "sub-details"',
+            "dim",
+        )
+    )
+    print(
+        deps.colorize(
+            "  You can also still reorganize: add/remove clusters, reorder, etc.",
+            "dim",
+        )
+    )
+
+
+def _print_enrich_warnings(
+    *,
+    plan: dict,
+    deps: EnrichStageDeps,
+) -> None:
+    get_project_root = deps.get_project_root
+    if get_project_root is None:
+        from desloppify.base.discovery.paths import get_project_root
+
+    bad_paths = deps.steps_with_bad_paths(plan, get_project_root())
+    if bad_paths:
+        total_bad = sum(len(bp) for _, _, bp in bad_paths)
+        print(
+            deps.colorize(
+                f"  Warning: {total_bad} file path(s) in step details don't exist on disk:",
+                "yellow",
+            )
+        )
+        for name, step_num, paths in bad_paths[:5]:
+            print(deps.colorize(f"    {name} step {step_num}: {', '.join(paths[:3])}", "yellow"))
+        print(
+            deps.colorize(
+                "  Fix paths before confirming enrich (confirmation will block on bad paths).",
+                "dim",
+            )
+        )
+
+    untagged = deps.steps_without_effort(plan)
+    if untagged:
+        total_missing = sum(n for _, n, _ in untagged)
+        print(deps.colorize(f"  Note: {total_missing} step(s) have no effort tag.", "yellow"))
+        print(
+            deps.colorize(
+                "  Consider: desloppify plan cluster update <name> --update-step N --effort small",
+                "dim",
+            )
+        )
+
+
 def run_stage_enrich(
     args: argparse.Namespace,
     *,
@@ -58,19 +225,15 @@ def run_stage_enrich(
 ) -> None:
     """Record the ENRICH stage with validation and optional auto-confirm."""
     resolved_deps = deps or EnrichStageDeps()
-    report: str | None = getattr(args, "report", None)
-    attestation: str | None = getattr(args, "attestation", None)
-
-    resolved_services = services or resolved_deps.default_triage_services()
-    plan = resolved_services.load_plan()
-    state = resolved_services.command_runtime(args).state
+    resolved_services, plan, state, stages, report, attestation = _resolve_enrich_stage_context(
+        args=args,
+        services=services,
+        deps=resolved_deps,
+    )
 
     if not resolved_deps.has_triage_in_queue(plan):
         print(resolved_deps.colorize("  No planning stages in the queue — nothing to enrich.", "yellow"))
         return
-
-    meta = plan.get("epic_triage_meta", {})
-    stages = meta.get("triage_stages", {})
 
     existing_stage = stages.get("enrich")
     report, is_reuse = resolved_deps.resolve_reusable_report(report, existing_stage)
@@ -78,129 +241,39 @@ def run_stage_enrich(
     if not resolved_deps.require_organize_stage_for_enrich(stages):
         return
 
-    if not stages.get("organize", {}).get("confirmed_at"):
-        if attestation:
-            auto_confirm_organize_for_complete = resolved_deps.auto_confirm_organize_for_complete
-            if auto_confirm_organize_for_complete is None:
-                from .validation.completion_stages import _auto_confirm_stage_for_complete
+    if not _require_confirmed_organize_stage(
+        plan=plan,
+        stages=stages,
+        attestation=attestation,
+        services=resolved_services,
+        deps=resolved_deps,
+    ):
+        return
 
-                auto_confirm_organize_for_complete = _auto_confirm_stage_for_complete
-            if not auto_confirm_organize_for_complete(
-                plan=plan,
-                stages=stages,
-                stage="organize",
-                attestation=attestation,
-                save_plan_fn=resolved_services.save_plan,
-            ):
-                return
-        else:
-            print(resolved_deps.colorize("  Cannot enrich: organize stage not confirmed.", "red"))
-            print(resolved_deps.colorize("  Run: desloppify plan triage --confirm organize", "dim"))
-            print(resolved_deps.colorize("  Or pass --attestation to auto-confirm organize inline.", "dim"))
-            return
-
-    if not is_reuse:
-        organize_ts = stages.get("organize", {}).get("timestamp", "")
-        if organize_ts:
-            activity = resolved_deps.count_log_activity_since(plan, organize_ts)
-            update_ops = activity.get("cluster_update", 0)
-            if update_ops == 0 and open_review_ids_from_state(state):
-                if attestation and len(attestation.strip()) >= 40:
-                    print(resolved_deps.colorize(
-                        "  Note: 0 cluster_update ops logged since organize. "
-                        "Proceeding with attestation override.",
-                        "yellow",
-                    ))
-                else:
-                    print(resolved_deps.colorize(
-                        "  Cannot enrich: no cluster_update operations logged since organize.",
-                        "red",
-                    ))
-                    print(resolved_deps.colorize(
-                        "  Enriching steps requires running cluster update commands.\n"
-                        '  e.g. desloppify plan cluster update <name> --update-step N --detail "..."',
-                        "dim",
-                    ))
-                    print(resolved_deps.colorize(
-                        '  Override: pass --attestation "reason why no update ops" (40+ chars).',
-                        "dim",
-                    ))
-                    return
+    if not is_reuse and not _require_cluster_update_activity(
+        plan=plan,
+        state=state,
+        stages=stages,
+        attestation=attestation,
+        deps=resolved_deps,
+    ):
+        return
 
     underspec = resolved_deps.underspecified_steps(plan)
     total_bare = sum(n for _, n, _ in underspec)
 
     if underspec:
-        print(
-            resolved_deps.colorize(
-                f"  Cannot enrich: {total_bare} step(s) across {len(underspec)} cluster(s) lack detail or issue_refs:",
-                "red",
-            )
-        )
-        for name, bare, total in underspec:
-            print(resolved_deps.colorize(f"    {name}: {bare}/{total} steps need enrichment", "yellow"))
-        print()
-        print(
-            resolved_deps.colorize(
-                "  Every step needs --detail (sub-points) or --issue-refs (for auto-completion).",
-                "dim",
-            )
-        )
-        print(resolved_deps.colorize("  Fix:", "dim"))
-        print(
-            resolved_deps.colorize(
-                '    desloppify plan cluster update <name> --update-step N --detail "sub-details"',
-                "dim",
-            )
-        )
-        print(
-            resolved_deps.colorize(
-                "  You can also still reorganize: add/remove clusters, reorder, etc.",
-                "dim",
-            )
-        )
+        _print_underspecified_step_error(underspec, deps=resolved_deps)
         return
 
     print(resolved_deps.colorize("  All steps have detail or issue_refs.", "green"))
-
-    get_project_root = resolved_deps.get_project_root
-    if get_project_root is None:
-        from desloppify.base.discovery.paths import get_project_root
-
-    bad_paths = resolved_deps.steps_with_bad_paths(plan, get_project_root())
-
-    if bad_paths:
-        total_bad = sum(len(bp) for _, _, bp in bad_paths)
-        print(
-            resolved_deps.colorize(
-                f"  Warning: {total_bad} file path(s) in step details don't exist on disk:",
-                "yellow",
-            )
-        )
-        for name, step_num, paths in bad_paths[:5]:
-            print(resolved_deps.colorize(f"    {name} step {step_num}: {', '.join(paths[:3])}", "yellow"))
-        print(
-            resolved_deps.colorize(
-                "  Fix paths before confirming enrich (confirmation will block on bad paths).",
-                "dim",
-            )
-        )
-
-    untagged = resolved_deps.steps_without_effort(plan)
-    if untagged:
-        total_missing = sum(n for _, n, _ in untagged)
-        print(resolved_deps.colorize(f"  Note: {total_missing} step(s) have no effort tag.", "yellow"))
-        print(
-            resolved_deps.colorize(
-                "  Consider: desloppify plan cluster update <name> --update-step N --effort small",
-                "dim",
-            )
-        )
+    _print_enrich_warnings(plan=plan, deps=resolved_deps)
 
     report = resolved_deps.enrich_report_or_error(report)
     if report is None:
         return
 
+    meta = plan.setdefault("epic_triage_meta", {})
     stages = meta.setdefault("triage_stages", {})
     cleared = resolved_deps.record_enrich_stage(
         stages,
