@@ -19,6 +19,12 @@ TRIAGE_STAGE_IDS = (
     "triage::sense-check",
     "triage::commit",
 )
+TRIAGE_STAGE_SPECS = tuple(
+    (stage_id.removeprefix("triage::"), stage_id) for stage_id in TRIAGE_STAGE_IDS
+)
+TRIAGE_STAGE_ORDER = {
+    stage_name: index for index, (stage_name, _stage_id) in enumerate(TRIAGE_STAGE_SPECS)
+}
 TRIAGE_IDS = set(TRIAGE_STAGE_IDS)
 _TRIAGE_STAGE_NAMES = {
     stage_id.removeprefix("triage::") for stage_id in TRIAGE_STAGE_IDS
@@ -133,7 +139,9 @@ __all__ = [
     "SYNTHETIC_PREFIXES",
     "TRIAGE_IDS",
     "TRIAGE_PREFIX",
+    "TRIAGE_STAGE_ORDER",
     "TRIAGE_STAGE_IDS",
+    "TRIAGE_STAGE_SPECS",
     "WORKFLOW_COMMUNICATE_SCORE_ID",
     "WORKFLOW_DEFERRED_DISPOSITION_ID",
     "WORKFLOW_IDS",

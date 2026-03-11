@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from desloppify.engine._work_queue.ranking import item_sort_key
 import desloppify.engine._work_queue.synthetic_workflow as workflow_mod
 
 
@@ -135,6 +136,21 @@ def test_build_create_plan_item_advances_to_next_pending_stage() -> None:
     assert tools[1]["command"] == (
         "desloppify plan triage --run-stages --runner claude --only-stages reflect"
     )
+
+
+def test_triage_stage_order_contract_keeps_sense_check_before_commit() -> None:
+    sense_check = {
+        "kind": "workflow_stage",
+        "detail": {"stage": "sense-check"},
+        "id": "triage::sense-check",
+    }
+    commit = {
+        "kind": "workflow_stage",
+        "detail": {"stage": "commit"},
+        "id": "triage::commit",
+    }
+
+    assert item_sort_key(sense_check) < item_sort_key(commit)
 
 
 def test_build_communicate_score_item_formats_command_and_delta(monkeypatch) -> None:

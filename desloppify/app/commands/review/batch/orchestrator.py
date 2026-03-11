@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess  # nosec B404
 import sys
@@ -28,6 +27,12 @@ from desloppify.intelligence.review.prepare import (
 from ..helpers import parse_dimensions
 from ..importing.cmd import do_import as _do_import
 from ..importing.flags import ReviewImportConfig
+from ..packet.build import (
+    build_holistic_packet,
+    build_run_batches_next_command,
+    prepared_packet_contract,
+    resolve_review_packet_context,
+)
 from ..packet.policy import coerce_review_batch_file_limit, redacted_review_config
 from ..prompt_sections import explode_to_single_dimension
 from ..runner_failures import print_failures, print_failures_and_raise
@@ -228,35 +233,9 @@ def _build_batch_run_deps(*, policy, project_root: Path) -> review_batches_mod.B
     )
 
 
-def _config_hash_for_packet_contract(config: dict | None) -> str:
-    """Return a stable config hash used in prepared-packet reuse checks."""
-    redacted = redacted_review_config(config or {})
-    payload = json.dumps(redacted, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
 def _build_prepared_packet_contract(args, *, config: dict | None) -> dict[str, object]:
     """Build normalized invocation contract for prepared packet reuse."""
-    requested_dims = sorted(parse_dimensions(args) or set())
-    retrospective = bool(getattr(args, "retrospective", False))
-    retrospective_max_issues = coerce_positive_int(
-        getattr(args, "retrospective_max_issues", None),
-        default=30,
-        minimum=1,
-    )
-    retrospective_max_batch_items = coerce_positive_int(
-        getattr(args, "retrospective_max_batch_items", None),
-        default=20,
-        minimum=1,
-    )
-    return {
-        "path": str(Path(getattr(args, "path", ".")).resolve()),
-        "dimensions": requested_dims,
-        "retrospective": retrospective,
-        "retrospective_max_issues": retrospective_max_issues,
-        "retrospective_max_batch_items": retrospective_max_batch_items,
-        "config_hash": _config_hash_for_packet_contract(config),
-    }
+    return prepared_packet_contract(resolve_review_packet_context(args), config=config)
 
 
 def _prepared_packet_contract_mismatch_reason(
@@ -402,51 +381,19 @@ def _load_or_prepare_packet(
                 )
             )
 
-    path = Path(args.path)
-    dimensions = list(dims) if dims else None
-    retrospective = bool(getattr(args, "retrospective", False))
-    retrospective_max_issues = coerce_positive_int(
-        getattr(args, "retrospective_max_issues", None),
-        default=30,
-        minimum=1,
-    )
-    retrospective_max_batch_items = coerce_positive_int(
-        getattr(args, "retrospective_max_batch_items", None),
-        default=20,
-        minimum=1,
-    )
-    lang_run, found_files = _setup_lang(lang, path, config)
-    lang_name = lang_run.name
-    narrative = narrative_mod.compute_narrative(
-        state,
-        context=narrative_mod.NarrativeContext(lang=lang_name, command="review"),
-    )
-
+    context = resolve_review_packet_context(args)
     blind_path = _blind_packet_path()
-    packet = prepare_holistic_review(
-        path,
-        lang_run,
-        state,
-        options=HolisticReviewPrepareOptions(
-            dimensions=dimensions,
-            files=found_files or None,
-            max_files_per_batch=coerce_review_batch_file_limit(config),
-            include_issue_history=retrospective,
-            issue_history_max_issues=retrospective_max_issues,
-            issue_history_max_batch_items=retrospective_max_batch_items,
-        ),
+    packet, _lang_name = build_holistic_packet(
+        state=state,
+        lang=lang,
+        config=config,
+        context=context,
+        setup_lang_fn=_setup_lang,
+        prepare_holistic_review_fn=prepare_holistic_review,
     )
     packet["config"] = redacted_review_config(config)
     packet[_PREPARED_PACKET_CONTRACT_KEY] = expected_contract
-    packet["narrative"] = narrative
-    next_command = "desloppify review --prepare"
-    if retrospective:
-        next_command += (
-            " --retrospective"
-            f" --retrospective-max-issues {retrospective_max_issues}"
-            f" --retrospective-max-batch-items {retrospective_max_batch_items}"
-        )
-    packet["next_command"] = next_command
+    packet["next_command"] = build_run_batches_next_command(context)
     write_query_best_effort(
         packet,
         context="review packet query update",

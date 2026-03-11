@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from desloppify.engine._plan.constants import TRIAGE_STAGE_SPECS
 from desloppify.engine._scoring.subjective.core import DISPLAY_NAMES
 from desloppify.engine._state.schema import StateModel
 from desloppify.engine._work_queue.helpers import (
@@ -118,10 +119,9 @@ def build_triage_stage_items(plan: dict, state: dict) -> list[WorkQueueItem]:
     force_visible = bool(meta.get("triage_force_visible"))
     confirmed = confirmed_triage_stage_names(meta)
     recorded_unconfirmed = recorded_unconfirmed_triage_stage_names(meta)
-    stage_names = ("observe", "reflect", "organize", "enrich", "sense-check", "commit")
     present_names = {
         name
-        for sid, name in zip(TRIAGE_STAGE_IDS, stage_names, strict=False)
+        for name, sid in TRIAGE_STAGE_SPECS
         if sid in present_ids
     }
     present_names.update(recorded_unconfirmed)
@@ -137,7 +137,7 @@ def build_triage_stage_items(plan: dict, state: dict) -> list[WorkQueueItem]:
 
     label_map = dict(TRIAGE_STAGE_LABELS)
     items: list[WorkQueueItem] = []
-    for sid, name in zip(TRIAGE_STAGE_IDS, stage_names, strict=False):
+    for name, sid in TRIAGE_STAGE_SPECS:
         if name not in present_names:
             continue
         if name in confirmed:

@@ -376,6 +376,63 @@ class TestPrepareHolisticReview:
         assert batch["concern_signals"][0]["question"] == "is this intentional?"
         assert "truncated to 3 files from 6 candidates" in batch["why"]
 
+    def test_concern_batch_includes_fingerprints_and_finding_ids(self):
+        concerns = [
+            SimpleNamespace(
+                type="complexity_hotspot",
+                file="src/big.ts",
+                summary="Large file with high complexity",
+                question="Is this file doing too many things?",
+                evidence=("Flagged by: structural",),
+                fingerprint="abc123def456",
+                source_issues=("structural::big.ts::large_file", "structural::big.ts::high_complexity"),
+            ),
+            SimpleNamespace(
+                type="systemic_smell",
+                file="src/utils.ts",
+                summary="Broad exception pattern",
+                question="Is this intentional?",
+                evidence=("Flagged by: smells",),
+                fingerprint="xyz789",
+                source_issues=("smells::utils.ts::broad_except",),
+            ),
+        ]
+        batch = _batch_concerns(concerns)
+
+        assert batch is not None
+        signals = batch["concern_signals"]
+        assert len(signals) == 2
+
+        assert signals[0]["fingerprint"] == "abc123def456"
+        assert signals[0]["finding_ids"] == [
+            "structural::big.ts::large_file",
+            "structural::big.ts::high_complexity",
+        ]
+        assert signals[1]["fingerprint"] == "xyz789"
+        assert signals[1]["finding_ids"] == ["smells::utils.ts::broad_except"]
+
+        # judgment_finding_counts should be keyed by detector (from source issue IDs)
+        counts = batch["judgment_finding_counts"]
+        assert counts["structural"] == 2
+        assert counts["smells"] == 1
+
+    def test_concern_batch_omits_empty_fingerprint_and_source_issues(self):
+        concerns = [
+            SimpleNamespace(
+                type="design_concern",
+                file="src/a.ts",
+                summary="concern",
+                question="ok?",
+                evidence=(),
+            ),
+        ]
+        batch = _batch_concerns(concerns)
+        assert batch is not None
+        signal = batch["concern_signals"][0]
+        assert "fingerprint" not in signal
+        assert "finding_ids" not in signal
+        assert "judgment_finding_counts" not in batch
+
     def test_prepare_holistic_review_applies_max_files_to_concern_batch(
         self, tmp_path, monkeypatch
     ):

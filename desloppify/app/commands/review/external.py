@@ -34,6 +34,7 @@ from .prompt_sections import (
     join_non_empty_sections,
     render_dimension_prompts_block,
     render_historical_focus,
+    render_judgment_findings_section,
     render_mechanical_concern_signals,
     render_scan_evidence_note,
     render_scope_enums,
@@ -225,10 +226,14 @@ def _build_claude_launch_prompt(
             f"--- Batch {i + 1}: {ctx.name} ---\n"
             f"Rationale: {ctx.rationale}\n"
         )
-        section += render_dimension_prompts_block(ctx.dimensions, dim_prompts)
+        section += render_dimension_prompts_block(
+            ctx.dimensions,
+            ctx.dimension_prompts or dim_prompts,
+        )
         section += render_seed_files_block(ctx)
         section += render_historical_focus(batch)
         section += render_mechanical_concern_signals(batch)
+        section += render_judgment_findings_section(batch)
         batch_sections.append(section)
 
     if not combined_cap:
@@ -257,7 +262,9 @@ def _build_claude_launch_prompt(
         '    "confidence": "high|medium|low",\n'
         '    "impact_scope": "local|module|subsystem|codebase",\n'
         '    "fix_scope": "single_edit|multi_file_refactor|architectural_change",\n'
-        '    "root_cause_cluster": "optional_cluster_name"\n'
+        '    "root_cause_cluster": "optional_cluster_name",\n'
+        '    "concern_verdict": "confirmed|dismissed  // required for concern signals",\n'
+        '    "concern_fingerprint": "abc123  // required when verdict is dismissed"\n'
         "  }]\n"
         "}\n\n"
     )

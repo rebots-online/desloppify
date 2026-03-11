@@ -16,6 +16,7 @@ class PromptBatchContext:
     rationale: str
     seed_files: tuple[str, ...]
     issues_cap: int
+    dimension_prompts: dict[str, dict[str, object]]
 
     @property
     def dimension_set(self) -> set[str]:
@@ -44,7 +45,19 @@ def build_batch_context(batch: dict[str, object], batch_index: int) -> PromptBat
         rationale=str(batch.get("why", "")).strip(),
         seed_files=coerce_string_list(batch.get("files_to_read", [])),
         issues_cap=max_batch_issues_for_dimension_count(len(dimensions)),
+        dimension_prompts=batch_dimension_prompts(batch),
     )
+
+
+def batch_dimension_prompts(batch: dict[str, object]) -> dict[str, dict[str, object]]:
+    raw_prompts = batch.get("dimension_prompts")
+    if not isinstance(raw_prompts, dict):
+        return {}
+    return {
+        str(dim): prompt
+        for dim, prompt in raw_prompts.items()
+        if isinstance(dim, str) and isinstance(prompt, dict)
+    }
 
 
 SCAN_EVIDENCE_FOCUS_BY_DIMENSION = {
@@ -152,6 +165,9 @@ def _concern_signal_lines(entry: dict[str, object]) -> list[str]:
     if question:
         lines.append(f"    question: {question}")
     lines.extend(f"    evidence: {snippet}" for snippet in evidence[:2])
+    fingerprint = str(entry.get("fingerprint", "")).strip()
+    if fingerprint:
+        lines.append(f"    fingerprint: {fingerprint}")
     return lines
 
 
@@ -169,19 +185,74 @@ def render_mechanical_concern_signals(batch: dict[str, object]) -> str:
         return ""
 
     lines: list[str] = []
-    lines.append("Mechanical concern signals — navigation aid, not scoring evidence:")
+    lines.append("Mechanical concern signals — investigate and adjudicate each one:")
     lines.append(
-        "Confirm or refute each with your own code reading. Report only confirmed defects."
+        "Read the source code for each concern. Then report your verdict in issues[]:"
+    )
+    lines.append(
+        '  - Real problem → report as a full issue with concern_verdict: "confirmed",'
+    )
+    lines.append(
+        "    concern_type, and concern_file (all standard issue fields still required)"
+    )
+    lines.append(
+        '  - Intentional/acceptable → report with concern_verdict: "dismissed"'
+        " and the concern_fingerprint shown below"
+    )
+    lines.append(
+        "  - Unsure → skip it (will be re-evaluated next review)"
     )
 
     valid_signals = _iter_valid_concern_signals(signals)
-    capped_signals = valid_signals[:8]
+    capped_signals = valid_signals[:30]
     for entry in capped_signals:
         lines.extend(_concern_signal_lines(entry))
 
     extra = max(0, len(valid_signals) - len(capped_signals))
     if extra:
         lines.append(f"  - (+{extra} more concern signals)")
+    return "\n".join(lines) + "\n\n"
+
+
+def render_judgment_findings_section(batch: dict[str, object]) -> str:
+    """Render CLI exploration instructions for judgment-required findings."""
+    counts = batch.get("judgment_finding_counts")
+    if not isinstance(counts, dict) or not counts:
+        return ""
+
+    lines: list[str] = [
+        "JUDGMENT FINDINGS — explore and adjudicate:",
+        "Mechanical detectors found patterns that need human judgment. Use these CLI commands",
+        "to explore the underlying findings, then read the actual source code.",
+        "",
+    ]
+    for detector, count in sorted(counts.items()):
+        try:
+            n = int(count)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            lines.append(f"  desloppify show {detector} --no-budget      # {n} findings")
+
+    lines.append("")
+
+    has_concern_signals = bool(
+        isinstance(batch.get("concern_signals"), list) and batch["concern_signals"]
+    )
+    if has_concern_signals:
+        lines.append(
+            "Each concern signal below was generated from these findings. For each one:"
+        )
+    else:
+        lines.append(
+            "Explore these findings alongside the seed files. For patterns that affect this dimension:"
+        )
+    lines.append(
+        '- Read the source code, then report in issues[] with concern_verdict: "confirmed" or "dismissed"'
+    )
+    lines.append(
+        "- Include the concern_fingerprint when dismissing so the finding won't resurface"
+    )
     return "\n".join(lines) + "\n\n"
 
 
@@ -257,10 +328,9 @@ def explode_to_single_dimension(
     """Split multi-dimension batches into one batch per dimension.
 
     Preserves seed files and rationale — each exploded batch keeps the same
-    file grouping but is scoped to a single dimension.  When *dimension_prompts*
-    is provided, each exploded batch gets a ``_dimension_prompt`` key with the
-    prompt for its single dimension so that downstream renderers can use it
-    without extra parameter threading.
+    file grouping but is scoped to a single dimension. When *dimension_prompts*
+    is provided, each exploded batch gets a public ``dimension_prompts`` map
+    scoped to its single dimension.
     """
     prompts = dimension_prompts or {}
     result: list[dict[str, object]] = []
@@ -273,7 +343,7 @@ def explode_to_single_dimension(
             exploded: dict[str, object] = {**batch, "dimensions": [dim]}
             dim_prompt = prompts.get(dim)
             if isinstance(dim_prompt, dict):
-                exploded["_dimension_prompt"] = dim_prompt
+                exploded["dimension_prompts"] = {str(dim): dim_prompt}
             result.append(exploded)
     return result
 
@@ -375,6 +445,7 @@ def join_non_empty_sections(*sections: str) -> str:
 
 __all__ = [
     "PromptBatchContext",
+    "batch_dimension_prompts",
     "coerce_string_list",
     "build_batch_context",
     "explode_to_single_dimension",
@@ -382,6 +453,7 @@ __all__ = [
     "SCAN_EVIDENCE_FOCUS_BY_DIMENSION",
     "render_scan_evidence_focus",
     "render_historical_focus",
+    "render_judgment_findings_section",
     "render_mechanical_concern_signals",
     "render_workflow_integrity_focus",
     "render_package_org_focus",

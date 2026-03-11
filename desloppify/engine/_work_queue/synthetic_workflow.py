@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 
+from desloppify.engine._plan.constants import TRIAGE_STAGE_SPECS
 from desloppify.engine.plan_queue import (
     WORKFLOW_COMMUNICATE_SCORE_ID,
     WORKFLOW_CREATE_PLAN_ID,
@@ -20,14 +21,6 @@ from desloppify.engine.plan_triage import (
     triage_runner_commands,
 )
 from desloppify.engine._work_queue.types import WorkQueueItem
-
-_TRIAGE_STAGE_SPECS: tuple[tuple[str, str], ...] = (
-    ("observe", "triage::observe"),
-    ("reflect", "triage::reflect"),
-    ("organize", "triage::organize"),
-    ("enrich", "triage::enrich"),
-    ("sense-check", "triage::sense-check"),
-)
 
 
 def _confirm_attestation_hint(stage: str) -> str:
@@ -63,13 +56,13 @@ def _triage_progression_target(plan: dict) -> tuple[str | None, bool]:
     """Return current triage stage target and whether it requires confirmation."""
     meta = plan.get("epic_triage_meta", {})
     triage_stages = meta.get("triage_stages", {}) or {}
-    for stage, _sid in _TRIAGE_STAGE_SPECS:
+    for stage, _sid in TRIAGE_STAGE_SPECS:
         stage_payload = triage_stages.get(stage)
         if isinstance(stage_payload, dict) and stage_payload and not stage_payload.get("confirmed_at"):
             return stage, True
 
     order = set(plan.get("queue_order", []))
-    for stage, sid in _TRIAGE_STAGE_SPECS:
+    for stage, sid in TRIAGE_STAGE_SPECS:
         if sid not in order:
             continue
         return stage, False

@@ -171,6 +171,9 @@ def _append_concerns_batch(
                             existing_files.add(filepath)
                     existing["concern_signals"] = concerns_batch.get("concern_signals", [])
                     existing["concern_signal_count"] = concerns_batch.get("concern_signal_count", 0)
+                    jfc = concerns_batch.get("judgment_finding_counts")
+                    if jfc:
+                        existing["judgment_finding_counts"] = jfc
                     merged = True
                     break
             if not merged:
@@ -280,6 +283,14 @@ def prepare_holistic_review_payload(
         options,
         allowed_review_files,
     )
+
+    # Annotate all batches with per-dimension judgment finding counts so every
+    # reviewer subagent gets CLI exploration commands for its dimension's detectors.
+    try:
+        from .prepare_batches_builders import annotate_batches_with_judgment_findings
+        annotate_batches_with_judgment_findings(batches, state)
+    except (ImportError, TypeError, ValueError):
+        pass  # best-effort; don't block review on annotation failure
 
     payload["investigation_batches"] = batches
     return payload
