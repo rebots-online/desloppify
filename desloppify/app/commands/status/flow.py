@@ -51,6 +51,74 @@ from .render import (
 _logger = logging.getLogger(__name__)
 
 
+def _print_status_warnings(config: dict) -> None:
+    skill_warning = check_skill_version()
+    if skill_warning:
+        print(colorize(f"  {skill_warning}", "yellow"))
+    config_warning = check_config_staleness(config)
+    if config_warning:
+        print(colorize(f"  {config_warning}", "yellow"))
+
+
+def _active_plan(plan: dict) -> dict | None:
+    return plan if (plan.get("queue_order") or plan.get("clusters")) else None
+
+
+def _build_status_context(
+    args: argparse.Namespace,
+    *,
+    state: dict,
+    config: dict,
+    target_strict_score: float,
+) -> tuple[dict, object, dict, list[str]]:
+    lang = resolve_lang(args)
+    lang_name = lang.name if lang else None
+    plan = load_plan()
+    active_plan = _active_plan(plan)
+    narrative = compute_narrative(
+        state,
+        context=NarrativeContext(lang=lang_name, command="status", plan=active_plan),
+    )
+    queue_ctx = queue_context(
+        state,
+        config=config,
+        plan=active_plan,
+        target_strict=target_strict_score,
+    )
+    ignores = config.get("ignore", [])
+    return plan, queue_ctx, narrative, ignores
+
+
+def _show_status_progress(
+    *,
+    state: dict,
+    dim_scores: dict,
+    by_tier: dict,
+    objective_backlog: int,
+    plan: dict | None,
+    target_strict_score: float,
+) -> None:
+    if dim_scores:
+        show_dimension_table(state, dim_scores, objective_backlog=objective_backlog)
+        reporting_dimensions_mod.show_score_model_breakdown(state, dim_scores=dim_scores)
+        show_focus_suggestion(dim_scores, state, plan=plan)
+        show_subjective_followup(
+            state,
+            dim_scores,
+            target_strict_score=target_strict_score,
+            objective_backlog=objective_backlog,
+        )
+        return
+    show_tier_progress_table(by_tier)
+
+
+def _print_review_staleness(review_age: object) -> None:
+    if review_age == 30:
+        return
+    label = "never" if review_age == 0 else f"{review_age} days"
+    print(colorize(f"  Review staleness: {label}", "dim"))
+
+
 def print_score_section(
     state: StateModel,
     scores: ScoreSnapshot,
@@ -103,37 +171,19 @@ def render_terminal_status(
     suppression: dict,
 ) -> None:
     """Render full terminal status output and write status query payload."""
-    skill_warning = check_skill_version()
-    if skill_warning:
-        print(colorize(f"  {skill_warning}", "yellow"))
-    config_warning = check_config_staleness(config)
-    if config_warning:
-        print(colorize(f"  {config_warning}", "yellow"))
-
+    _print_status_warnings(config)
     scores = score_snapshot(state)
     by_tier = stats.get("by_tier", {})
     target_strict_score = target_strict_score_from_config(config)
-
-    lang = resolve_lang(args)
-    lang_name = lang.name if lang else None
-
-    plan = load_plan()
-    active_plan = plan if (plan.get("queue_order") or plan.get("clusters")) else None
+    plan, queue_ctx, narrative, ignores = _build_status_context(
+        args,
+        state=state,
+        config=config,
+        target_strict_score=target_strict_score,
+    )
+    active_plan = _active_plan(plan)
 
     print_triage_guardrail_info(plan=plan, state=state)
-
-    narrative = compute_narrative(
-        state,
-        context=NarrativeContext(lang=lang_name, command="status", plan=active_plan),
-    )
-    ignores = config.get("ignore", [])
-
-    queue_ctx = queue_context(
-        state,
-        config=config,
-        plan=active_plan,
-        target_strict=target_strict_score,
-    )
 
     print_score_section(state, scores, plan, target_strict_score, queue_ctx)
     print_scan_metrics(state)
@@ -141,21 +191,14 @@ def render_terminal_status(
     print_scan_completeness(state)
 
     objective_backlog = queue_ctx.snapshot.objective_in_scope_count
-
-    if dim_scores:
-        show_dimension_table(state, dim_scores, objective_backlog=objective_backlog)
-        reporting_dimensions_mod.show_score_model_breakdown(state, dim_scores=dim_scores)
-    else:
-        show_tier_progress_table(by_tier)
-
-    if dim_scores:
-        show_focus_suggestion(dim_scores, state, plan=active_plan)
-        show_subjective_followup(
-            state,
-            dim_scores,
-            target_strict_score=target_strict_score,
-            objective_backlog=objective_backlog,
-        )
+    _show_status_progress(
+        state=state,
+        dim_scores=dim_scores,
+        by_tier=by_tier,
+        objective_backlog=objective_backlog,
+        plan=active_plan,
+        target_strict_score=target_strict_score,
+    )
 
     show_review_summary(state)
     show_structural_areas(state)
@@ -175,9 +218,7 @@ def render_terminal_status(
         show_ignore_summary(ignores, suppression)
 
     review_age = config.get("review_max_age_days", 30)
-    if review_age != 30:
-        label = "never" if review_age == 0 else f"{review_age} days"
-        print(colorize(f"  Review staleness: {label}", "dim"))
+    _print_review_staleness(review_age)
     print()
 
     write_status_query(

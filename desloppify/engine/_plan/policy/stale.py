@@ -21,24 +21,72 @@ def open_review_ids(state: StateModel) -> set[str]:
     }
 
 
+def _subjective_entry_id(
+    dimension_key: object,
+    *,
+    subjective_prefix: str,
+) -> str:
+    return f"{subjective_prefix}{slugify(str(dimension_key))}"
+
+
+def _subjective_entries(state: StateModel) -> list[dict]:
+    dim_scores = state.get("dimension_scores", {}) or {}
+    if not dim_scores:
+        return []
+    return list(all_subjective_entries(state, dim_scores=dim_scores))
+
+
+def _collect_subjective_entry_ids(
+    entries: list[dict],
+    *,
+    subjective_prefix: str,
+    predicate,
+) -> set[str]:
+    collected: set[str] = set()
+    for entry in entries:
+        dim_key = entry.get("dimension_key", "")
+        if not dim_key or not predicate(entry):
+            continue
+        collected.add(_subjective_entry_id(dim_key, subjective_prefix=subjective_prefix))
+    return collected
+
+
 def current_stale_ids(
     state: StateModel,
     *,
     subjective_prefix: str = "subjective::",
 ) -> set[str]:
     """Return ``subjective::<slug>`` IDs that are currently stale."""
-    dim_scores = state.get("dimension_scores", {}) or {}
-    if not dim_scores:
-        return set()
+    return _collect_subjective_entry_ids(
+        _subjective_entries(state),
+        subjective_prefix=subjective_prefix,
+        predicate=lambda entry: bool(entry.get("stale")),
+    )
 
-    stale: set[str] = set()
-    for entry in all_subjective_entries(state, dim_scores=dim_scores):
-        if not entry.get("stale"):
+
+def _unscored_ids_from_assessments(
+    assessments: dict,
+    *,
+    subjective_prefix: str,
+) -> set[str]:
+    unscored: set[str] = set()
+    for dim_key, payload in assessments.items():
+        if not isinstance(payload, dict) or not payload.get("placeholder") or not dim_key:
             continue
-        dim_key = entry.get("dimension_key", "")
-        if dim_key:
-            stale.add(f"{subjective_prefix}{slugify(dim_key)}")
-    return stale
+        unscored.add(_subjective_entry_id(dim_key, subjective_prefix=subjective_prefix))
+    return unscored
+
+
+def _unscored_ids_from_dimension_scores(
+    entries: list[dict],
+    *,
+    subjective_prefix: str,
+) -> set[str]:
+    return _collect_subjective_entry_ids(
+        entries,
+        subjective_prefix=subjective_prefix,
+        predicate=lambda entry: bool(entry.get("placeholder")),
+    )
 
 
 def current_unscored_ids(
@@ -49,34 +97,14 @@ def current_unscored_ids(
     """Return ``subjective::<slug>`` IDs that are currently unscored."""
     assessments = state.get("subjective_assessments")
     if isinstance(assessments, dict) and assessments:
-        unscored: set[str] = set()
-        for dim_key, payload in assessments.items():
-            if not isinstance(payload, dict):
-                continue
-            if not payload.get("placeholder"):
-                continue
-            if dim_key:
-                unscored.add(f"{subjective_prefix}{slugify(dim_key)}")
-        return unscored
-
-    dim_scores = state.get("dimension_scores", {}) or {}
-    if not dim_scores:
-        return set()
-
-    unscored = set()
-    for data in dim_scores.values():
-        if not isinstance(data, dict):
-            continue
-        detectors = data.get("detectors", {})
-        meta = detectors.get("subjective_assessment")
-        if not isinstance(meta, dict):
-            continue
-        if not meta.get("placeholder"):
-            continue
-        dim_key = meta.get("dimension_key", "")
-        if dim_key:
-            unscored.add(f"{subjective_prefix}{slugify(dim_key)}")
-    return unscored
+        return _unscored_ids_from_assessments(
+            assessments,
+            subjective_prefix=subjective_prefix,
+        )
+    return _unscored_ids_from_dimension_scores(
+        _subjective_entries(state),
+        subjective_prefix=subjective_prefix,
+    )
 
 
 def current_under_target_ids(
@@ -86,27 +114,26 @@ def current_under_target_ids(
     subjective_prefix: str = "subjective::",
 ) -> set[str]:
     """Return under-target subjective IDs that are neither stale nor unscored."""
-    dim_scores = state.get("dimension_scores", {}) or {}
-    if not dim_scores:
+    entries = _subjective_entries(state)
+    if not entries:
         return set()
 
     stale_ids = current_stale_ids(state, subjective_prefix=subjective_prefix)
     unscored_ids = current_unscored_ids(state, subjective_prefix=subjective_prefix)
 
-    under_target: set[str] = set()
-    for entry in all_subjective_entries(state, dim_scores=dim_scores):
-        if entry.get("placeholder") or entry.get("stale"):
-            continue
-        strict_val = float(entry.get("strict", entry.get("score", 100.0)))
-        if strict_val >= target_strict:
-            continue
-        dim_key = entry.get("dimension_key", "")
-        if not dim_key:
-            continue
-        item_id = f"{subjective_prefix}{slugify(dim_key)}"
-        if item_id not in stale_ids and item_id not in unscored_ids:
-            under_target.add(item_id)
-    return under_target
+    return {
+        item_id
+        for item_id in _collect_subjective_entry_ids(
+            entries,
+            subjective_prefix=subjective_prefix,
+            predicate=lambda entry: (
+                not entry.get("placeholder")
+                and not entry.get("stale")
+                and float(entry.get("strict", entry.get("score", 100.0))) < target_strict
+            ),
+        )
+        if item_id not in stale_ids and item_id not in unscored_ids
+    }
 
 
 def review_issue_snapshot_hash(state: StateModel) -> str:

@@ -252,6 +252,78 @@ def subjective_integrity_followup(
     }
 
 
+def _coerce_integrity_notice_fields(
+    integrity_notice: dict[str, object],
+    *,
+    fallback_target: float,
+) -> tuple[str, int, float, str, str]:
+    return (
+        str(integrity_notice.get("status", "")).strip().lower(),
+        coerce_notice_count(integrity_notice.get("count", 0)),
+        coerce_target_score(
+            integrity_notice.get("target"),
+            fallback=fallback_target,
+        ),
+        str(integrity_notice.get("rendered", "subjective dimensions")),
+        str(integrity_notice.get("command", "")),
+    )
+
+
+def _penalized_integrity_notice_lines(
+    *,
+    count: int,
+    target_display: float,
+    rendered: str,
+    command: str,
+) -> list[tuple[str, str]]:
+    return [
+        (
+            "red",
+            "WARNING: "
+            f"{count} subjective dimensions matched target {target_display:.1f} "
+            f"and were reset to 0.0 this scan: {rendered}.",
+        ),
+        (
+            "yellow",
+            "Anti-gaming safeguard applied. Re-review objectively and import fresh assessments.",
+        ),
+        ("dim", f"Rerun now: {command}"),
+    ]
+
+
+def _warn_integrity_notice_lines(
+    *,
+    count: int,
+    target_display: float,
+    command: str,
+) -> list[tuple[str, str]]:
+    dimension_label = "dimension is" if count == 1 else "dimensions are"
+    return [
+        (
+            "yellow",
+            "WARNING: "
+            f"{count} subjective {dimension_label} parked on target {target_display:.1f}. "
+            "Re-run that review with evidence-first scoring before treating this score as final.",
+        ),
+        ("dim", f"Next step: {command}"),
+    ]
+
+
+def _at_target_integrity_notice_lines(
+    *,
+    count: int,
+    command: str,
+) -> list[tuple[str, str]]:
+    return [
+        (
+            "yellow",
+            "WARNING: "
+            f"{count} of your subjective scores matches the target score, indicating a high risk of gaming. "
+            f"Can you rerun them by running {command} taking extra care to be objective.",
+        ),
+    ]
+
+
 def subjective_integrity_notice_lines(
     integrity_notice: dict[str, object] | None,
     *,
@@ -260,51 +332,33 @@ def subjective_integrity_notice_lines(
     if not integrity_notice:
         return []
 
-    status = str(integrity_notice.get("status", "")).strip().lower()
-    count = coerce_notice_count(integrity_notice.get("count", 0))
-    target_display = coerce_target_score(
-        integrity_notice.get("target"),
-        fallback=fallback_target,
+    status, count, target_display, rendered, command = (
+        _coerce_integrity_notice_fields(
+            integrity_notice,
+            fallback_target=fallback_target,
+        )
     )
-    rendered = str(integrity_notice.get("rendered", "subjective dimensions"))
-    command = str(integrity_notice.get("command", ""))
 
     if status == "penalized":
-        return [
-            (
-                "red",
-                "WARNING: "
-                f"{count} subjective dimensions matched target {target_display:.1f} "
-                f"and were reset to 0.0 this scan: {rendered}.",
-            ),
-            (
-                "yellow",
-                "Anti-gaming safeguard applied. Re-review objectively and import fresh assessments.",
-            ),
-            ("dim", f"Rerun now: {command}"),
-        ]
+        return _penalized_integrity_notice_lines(
+            count=count,
+            target_display=target_display,
+            rendered=rendered,
+            command=command,
+        )
 
     if status == "warn":
-        dimension_label = "dimension is" if count == 1 else "dimensions are"
-        return [
-            (
-                "yellow",
-                "WARNING: "
-                f"{count} subjective {dimension_label} parked on target {target_display:.1f}. "
-                "Re-run that review with evidence-first scoring before treating this score as final.",
-            ),
-            ("dim", f"Next step: {command}"),
-        ]
+        return _warn_integrity_notice_lines(
+            count=count,
+            target_display=target_display,
+            command=command,
+        )
 
     if status == "at_target":
-        return [
-            (
-                "yellow",
-                "WARNING: "
-                f"{count} of your subjective scores matches the target score, indicating a high risk of gaming. "
-                f"Can you rerun them by running {command} taking extra care to be objective.",
-            ),
-        ]
+        return _at_target_integrity_notice_lines(
+            count=count,
+            command=command,
+        )
 
     return []
 
@@ -359,6 +413,53 @@ def build_subjective_followup(
     )
 
 
+def _subjective_coverage_global(state: dict) -> int:
+    all_issues = state.get("issues", {})
+    if not isinstance(all_issues, dict):
+        all_issues = {}
+    coverage_global, _reason_counts, _holistic_reasons = (
+        subjective_integrity_mod.subjective_review_open_breakdown(all_issues)
+    )
+    return coverage_global
+
+
+def _subjective_summary_parts(
+    *,
+    low_assessed: list[dict],
+    unassessed: list[dict],
+    stale_count: int,
+    coverage_global: int,
+    threshold_label: str,
+) -> list[str]:
+    parts: list[str] = []
+    if low_assessed:
+        parts.append(f"{len(low_assessed)} below target ({threshold_label}%)")
+    if unassessed:
+        parts.append(f"{len(unassessed)} unassessed")
+    if stale_count:
+        parts.append(f"{stale_count} stale")
+    if coverage_global > 0:
+        parts.append(f"{coverage_global} files need review")
+    return parts
+
+
+def _should_render_subjective_paths(
+    *,
+    unassessed: list[dict],
+    low_assessed: list[dict],
+    stale_count: int,
+    coverage_global: int,
+    integrity_notice: dict[str, object] | None,
+) -> bool:
+    return bool(
+        unassessed
+        or low_assessed
+        or stale_count
+        or coverage_global > 0
+        or integrity_notice
+    )
+
+
 def show_subjective_paths(
     state: dict,
     dim_scores: dict,
@@ -384,21 +485,14 @@ def show_subjective_paths(
         key=lambda item: item["name"].lower(),
     )
     low_assessed = followup.low_assessed
-
-    all_issues = state.get("issues", {})
-    if not isinstance(all_issues, dict):
-        all_issues = {}
-    coverage_global, _reason_counts, _holistic_reasons = (
-        subjective_integrity_mod.subjective_review_open_breakdown(all_issues)
-    )
-
+    coverage_global = _subjective_coverage_global(state)
     stale_count = sum(1 for e in subjective_entries if e.get("stale"))
-    if (
-        not unassessed
-        and not low_assessed
-        and stale_count == 0
-        and coverage_global <= 0
-        and not followup.integrity_notice
+    if not _should_render_subjective_paths(
+        unassessed=unassessed,
+        low_assessed=low_assessed,
+        stale_count=stale_count,
+        coverage_global=coverage_global,
+        integrity_notice=followup.integrity_notice,
     ):
         return
 
@@ -407,16 +501,13 @@ def show_subjective_paths(
         print(colorize_fn(f"    {message}", style))
 
     # Collapsed summary replacing verbose Subjective path section.
-    parts: list[str] = []
-    if low_assessed:
-        parts.append(f"{len(low_assessed)} below target ({followup.threshold_label}%)")
-    if unassessed:
-        parts.append(f"{len(unassessed)} unassessed")
-    if stale_count:
-        parts.append(f"{stale_count} stale")
-    if coverage_global > 0:
-        parts.append(f"{coverage_global} files need review")
-
+    parts = _subjective_summary_parts(
+        low_assessed=low_assessed,
+        unassessed=unassessed,
+        stale_count=stale_count,
+        coverage_global=coverage_global,
+        threshold_label=followup.threshold_label,
+    )
     if parts:
         print(colorize_fn(f"  Subjective: {', '.join(parts)}.", "cyan"))
         print(colorize_fn("  Run `desloppify show subjective` for details.", "dim"))

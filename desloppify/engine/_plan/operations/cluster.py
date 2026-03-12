@@ -8,6 +8,49 @@ from desloppify.engine._plan.schema import Cluster, PlanModel, ensure_plan_defau
 from desloppify.engine._state.schema import utc_now
 
 
+def _cluster_or_raise(plan: PlanModel, cluster_name: str) -> Cluster:
+    cluster = plan["clusters"].get(cluster_name)
+    if cluster is None:
+        raise ValueError(f"Cluster {cluster_name!r} does not exist")
+    return cluster
+
+
+def _upsert_cluster_override(
+    plan: PlanModel,
+    issue_id: str,
+    *,
+    cluster_name: str,
+    timestamp: str,
+) -> None:
+    overrides = plan["overrides"]
+    if issue_id not in overrides:
+        overrides[issue_id] = {"issue_id": issue_id, "created_at": timestamp}
+    overrides[issue_id]["cluster"] = cluster_name
+    overrides[issue_id]["updated_at"] = timestamp
+
+
+def _clear_cluster_override(
+    plan: PlanModel,
+    issue_id: str,
+    *,
+    cluster_name: str,
+    timestamp: str,
+) -> None:
+    override = plan["overrides"].get(issue_id)
+    if override and override.get("cluster") == cluster_name:
+        override["cluster"] = None
+        override["updated_at"] = timestamp
+
+
+def _copy_missing_cluster_metadata(target: Cluster, source: Cluster) -> None:
+    if not target.get("description") and source.get("description"):
+        target["description"] = source["description"]
+    if not target.get("action_steps") and source.get("action_steps"):
+        target["action_steps"] = list(source["action_steps"])
+    if not target.get("action") and source.get("action"):
+        target["action"] = source["action"]
+
+
 def create_cluster(
     plan: PlanModel,
     name: str,
@@ -49,10 +92,7 @@ def add_to_cluster(
 ) -> int:
     """Add issue IDs to a cluster. Returns count added."""
     ensure_plan_defaults(plan)
-    cluster = plan["clusters"].get(cluster_name)
-    if cluster is None:
-        raise ValueError(f"Cluster {cluster_name!r} does not exist")
-
+    cluster = _cluster_or_raise(plan, cluster_name)
     member_ids: list[str] = cluster["issue_ids"]
     count = 0
     now = utc_now()
@@ -60,11 +100,12 @@ def add_to_cluster(
         if fid not in member_ids:
             member_ids.append(fid)
             count += 1
-        overrides = plan["overrides"]
-        if fid not in overrides:
-            overrides[fid] = {"issue_id": fid, "created_at": now}
-        overrides[fid]["cluster"] = cluster_name
-        overrides[fid]["updated_at"] = now
+        _upsert_cluster_override(
+            plan,
+            fid,
+            cluster_name=cluster_name,
+            timestamp=now,
+        )
 
     cluster["updated_at"] = now
     return count
@@ -77,10 +118,7 @@ def remove_from_cluster(
 ) -> int:
     """Remove issue IDs from a cluster. Returns count removed."""
     ensure_plan_defaults(plan)
-    cluster = plan["clusters"].get(cluster_name)
-    if cluster is None:
-        raise ValueError(f"Cluster {cluster_name!r} does not exist")
-
+    cluster = _cluster_or_raise(plan, cluster_name)
     member_ids: list[str] = cluster["issue_ids"]
     now = utc_now()
     count = 0
@@ -88,10 +126,12 @@ def remove_from_cluster(
         if fid in member_ids:
             member_ids.remove(fid)
             count += 1
-        override = plan["overrides"].get(fid)
-        if override and override.get("cluster") == cluster_name:
-            override["cluster"] = None
-            override["updated_at"] = now
+        _clear_cluster_override(
+            plan,
+            fid,
+            cluster_name=cluster_name,
+            timestamp=now,
+        )
 
     if count > 0 and cluster.get("auto"):
         cluster["user_modified"] = True
@@ -104,17 +144,18 @@ def remove_from_cluster(
 def delete_cluster(plan: PlanModel, name: str) -> list[str]:
     """Delete a cluster and clear cluster refs from overrides. Returns orphaned IDs."""
     ensure_plan_defaults(plan)
-    cluster = plan["clusters"].pop(name, None)
-    if cluster is None:
-        raise ValueError(f"Cluster {name!r} does not exist")
+    cluster = _cluster_or_raise(plan, name)
+    plan["clusters"].pop(name, None)
 
     orphaned = list(cluster.get("issue_ids", []))
     now = utc_now()
     for fid in orphaned:
-        override = plan["overrides"].get(fid)
-        if override and override.get("cluster") == name:
-            override["cluster"] = None
-            override["updated_at"] = now
+        _clear_cluster_override(
+            plan,
+            fid,
+            cluster_name=name,
+            timestamp=now,
+        )
 
     if plan.get("active_cluster") == name:
         plan["active_cluster"] = None
@@ -131,12 +172,8 @@ def merge_clusters(
     ensure_plan_defaults(plan)
     if source_name == target_name:
         raise ValueError("Cannot merge a cluster into itself")
-    source = plan["clusters"].get(source_name)
-    if source is None:
-        raise ValueError(f"Source cluster {source_name!r} does not exist")
-    target = plan["clusters"].get(target_name)
-    if target is None:
-        raise ValueError(f"Target cluster {target_name!r} does not exist")
+    source = _cluster_or_raise(plan, source_name)
+    target = _cluster_or_raise(plan, target_name)
 
     source_ids = list(source.get("issue_ids", []))
     target_ids: list[str] = target["issue_ids"]
@@ -149,18 +186,14 @@ def merge_clusters(
             target_ids.append(fid)
             existing.add(fid)
             added += 1
-        overrides = plan["overrides"]
-        if fid not in overrides:
-            overrides[fid] = {"issue_id": fid, "created_at": now}
-        overrides[fid]["cluster"] = target_name
-        overrides[fid]["updated_at"] = now
+        _upsert_cluster_override(
+            plan,
+            fid,
+            cluster_name=target_name,
+            timestamp=now,
+        )
 
-    if not target.get("description") and source.get("description"):
-        target["description"] = source["description"]
-    if not target.get("action_steps") and source.get("action_steps"):
-        target["action_steps"] = list(source["action_steps"])
-    if not target.get("action") and source.get("action"):
-        target["action"] = source["action"]
+    _copy_missing_cluster_metadata(target, source)
 
     target["updated_at"] = now
 
@@ -180,10 +213,7 @@ def move_cluster(
 ) -> int:
     """Move all cluster members as a contiguous block. Returns count moved."""
     ensure_plan_defaults(plan)
-    cluster = plan["clusters"].get(cluster_name)
-    if cluster is None:
-        raise ValueError(f"Cluster {cluster_name!r} does not exist")
-
+    cluster = _cluster_or_raise(plan, cluster_name)
     member_ids = list(cluster.get("issue_ids", []))
     if not member_ids:
         return 0
