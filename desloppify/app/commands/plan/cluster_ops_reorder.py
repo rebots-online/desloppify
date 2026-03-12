@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from desloppify.app.commands.helpers.runtime import command_runtime
+from desloppify.app.commands.plan.shared.cluster_membership import cluster_issue_ids
 from desloppify.app.commands.plan.shared.patterns import resolve_ids_from_patterns
 from desloppify.app.commands.plan.reorder_handlers import resolve_target
 from desloppify.base.output.terminal import colorize
@@ -126,7 +127,7 @@ def _resolve_item_reorder_context(
     cluster_name: str,
     item_pattern: str,
 ) -> tuple[dict, set[str], list[str], list[str]] | None:
-    cluster_member_set = set(clusters[cluster_name].get("issue_ids", []))
+    cluster_member_set = set(cluster_issue_ids(clusters[cluster_name]))
     state = command_runtime(args).state
     item_ids = resolve_ids_from_patterns(state, [item_pattern], plan=plan)
     if not item_ids:
@@ -219,7 +220,7 @@ def _reorder_whole_clusters(
     seen: set[str] = set()
     all_member_ids: list[str] = []
     for name in cluster_names:
-        for fid in clusters[name].get("issue_ids", []):
+        for fid in cluster_issue_ids(clusters[name]):
             if fid not in seen:
                 seen.add(fid)
                 all_member_ids.append(fid)

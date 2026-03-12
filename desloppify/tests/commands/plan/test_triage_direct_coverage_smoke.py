@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import inspect
 
+from desloppify.app.commands.plan.shared.cluster_membership import cluster_issue_ids
+from desloppify.app.commands.plan.triage.plan_state_access import ensure_execution_log
 import desloppify.app.commands.plan.triage.command as triage_command_mod
 import desloppify.app.commands.plan.triage.helpers as triage_helpers_mod
 import desloppify.app.commands.plan.triage.services as triage_services_mod
@@ -21,6 +23,7 @@ def test_triage_helper_modules_direct_coverage_smoke() -> None:
     assert callable(triage_helpers_mod.has_triage_in_queue)
     assert callable(triage_helpers_mod.triage_coverage)
     assert callable(triage_helpers_mod.group_issues_into_observe_batches)
+    assert callable(cluster_issue_ids)
 
     services = triage_services_mod.default_triage_services()
     assert isinstance(services, triage_services_mod.TriageServices)
@@ -72,3 +75,18 @@ def test_count_log_activity_since_ignores_malformed_entries() -> None:
     }
     counts = triage_helpers_mod.count_log_activity_since(plan, "2025-12-31T00:00:00Z")
     assert counts == {"resolve": 1}
+
+
+def test_ensure_execution_log_replaces_malformed_entries_in_plan() -> None:
+    plan = {
+        "execution_log": [
+            {"timestamp": "2026-01-01T00:00:00Z", "action": "resolve"},
+            "bad-entry",
+            123,
+        ]
+    }
+
+    normalized = ensure_execution_log(plan)
+
+    assert normalized == [{"timestamp": "2026-01-01T00:00:00Z", "action": "resolve"}]
+    assert plan["execution_log"] == normalized

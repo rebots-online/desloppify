@@ -410,10 +410,16 @@ class TestGatherAuthContext:
 
             @requires_auth
             def endpoint3(): pass
+
+            @permission_required("reports.view_secret")
+            def endpoint4(): pass
+
+            @staff_member_required
+            def endpoint5(): pass
         """)
         result = _gather_auth_context({"/src/api.py": content})
         assert "auth_patterns" in result
-        assert result["auth_patterns"]["api.py"] == 3
+        assert result["auth_patterns"]["api.py"] == 5
 
     def test_empty_input_returns_empty(self):
         """Empty file_contents should return empty dict."""

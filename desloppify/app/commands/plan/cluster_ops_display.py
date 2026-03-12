@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from desloppify.app.commands.helpers.runtime import command_runtime
+from desloppify.app.commands.plan.shared.cluster_membership import cluster_issue_ids
 from desloppify.base.output.terminal import colorize
 from desloppify.engine.plan_state import load_plan
 
@@ -100,7 +101,7 @@ def _cmd_cluster_show(args: argparse.Namespace) -> None:
 
     _print_cluster_metadata(cluster_name, cluster)
     steps = cluster.get("action_steps") or []
-    issue_ids = cluster.get("issue_ids", [])
+    issue_ids = cluster_issue_ids(cluster)
     _print_cluster_steps(steps)
     _print_cluster_members(args, issue_ids)
     _print_cluster_commands(cluster_name)
@@ -114,7 +115,7 @@ def _sorted_clusters_by_queue_pos(
     pos_map = {fid: i for i, fid in enumerate(queue_order)}
 
     def _min_pos(cluster_data: dict) -> int:
-        positions = [pos_map[fid] for fid in cluster_data.get("issue_ids", []) if fid in pos_map]
+        positions = [pos_map[fid] for fid in cluster_issue_ids(cluster_data) if fid in pos_map]
         return min(positions) if positions else 999_999
 
     min_pos_cache = {name: _min_pos(c) for name, c in clusters.items()}
@@ -194,7 +195,7 @@ def _cluster_list_verbose_row(
     has_dep: bool,
     active: str | None,
 ) -> str:
-    member_count = len(cluster.get("issue_ids", []))
+    member_count = len(cluster_issue_ids(cluster))
     desc = _cluster_list_description(
         cluster.get("description") or "",
         min_pos=min_pos,
@@ -237,7 +238,7 @@ def _print_cluster_list_summary(
         pos_str = f"#{min_p}" if min_p < 999_999 else "—"
         priority = cluster.get("priority")
         pri_tag = f" [P{priority}]" if priority is not None else ""
-        member_count = len(cluster.get("issue_ids", []))
+        member_count = len(cluster_issue_ids(cluster))
         desc = cluster.get("description") or ""
         marker = " (focused)" if name == active else ""
         desc_str = f" — {desc}" if desc else ""

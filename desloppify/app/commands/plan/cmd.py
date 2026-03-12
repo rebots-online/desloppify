@@ -29,6 +29,7 @@ from desloppify.app.commands.plan.policy_cmd import cmd_policy_dispatch
 from desloppify.app.commands.plan.queue_render import cmd_plan_queue
 from desloppify.app.commands.plan.repair_state import cmd_plan_repair_state
 from desloppify.app.commands.plan.reorder_handlers import cmd_plan_reorder
+from desloppify.app.commands.plan.shared.cluster_membership import cluster_issue_ids
 from desloppify.app.commands.plan.triage.command import cmd_plan_triage
 from desloppify.engine.plan_state import (
     commit_tracking_summary,
@@ -140,7 +141,7 @@ def _print_cluster_summary(plan: dict, *, active: str | None) -> None:
         return
     for name, cluster in clusters.items():
         desc = cluster.get("description") or ""
-        member_count = len(cluster.get("issue_ids", []))
+        member_count = len(cluster_issue_ids(cluster))
         marker = " (focused)" if name == active else ""
         desc_str = f" — {desc}" if desc else ""
         print(f"    {name}: {member_count} items{desc_str}{marker}")

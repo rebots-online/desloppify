@@ -74,6 +74,8 @@ def test_gather_auth_context_tracks_policy_only_tables_separately():
             "CREATE TABLE accounts(id int);\n"
             "CREATE TABLE posts(id int);\n"
             "ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;\n"
+        ),
+        "policies.sql": (
             "CREATE POLICY post_reader ON posts;\n"
         ),
     }
@@ -81,6 +83,7 @@ def test_gather_auth_context_tracks_policy_only_tables_separately():
     assert result["rls_coverage"]["with_rls"] == ["accounts"]
     assert result["rls_coverage"]["policy_only"] == ["posts"]
     assert "posts" in result["rls_coverage"]["without_rls"]
+    assert result["rls_coverage"]["files"]["posts"] == ["policies.sql", "schema.sql"]
 
 
 def test_gather_auth_context_excludes_server_only_service_role_paths():

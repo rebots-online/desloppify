@@ -51,7 +51,10 @@ def ensure_execution_log(plan: PlanModel) -> list[dict[str, Any]]:
     """Return execution log, creating the stored list when missing."""
     log = plan.get("execution_log")
     if isinstance(log, list):
-        return [entry for entry in log if isinstance(entry, dict)]
+        normalized = [entry for entry in log if isinstance(entry, dict)]
+        if normalized is not log:
+            plan["execution_log"] = normalized
+        return normalized
     normalized: list[dict[str, Any]] = []
     plan["execution_log"] = normalized
     return normalized

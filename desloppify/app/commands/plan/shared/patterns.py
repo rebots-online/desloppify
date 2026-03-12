@@ -9,6 +9,8 @@ from desloppify.engine._work_queue.core import QueueBuildOptions, build_work_que
 from desloppify.engine._state.resolution import match_issues
 from desloppify.state_io import StateModel
 
+from .cluster_membership import cluster_issue_ids
+
 
 def _append_unique(issue_id: str, seen: set[str], result: list[str]) -> None:
     if issue_id in seen:
@@ -24,7 +26,7 @@ def _collect_plan_ids(plan: PlanModel | None) -> set[str]:
     plan_ids.update(plan.get("queue_order", []))
     plan_ids.update(plan.get("skipped", {}).keys())
     for cluster in plan.get("clusters", {}).values():
-        plan_ids.update(cluster.get("issue_ids", []))
+        plan_ids.update(cluster_issue_ids(cluster))
     return plan_ids
 
 
@@ -96,7 +98,7 @@ def _resolve_single_pattern(
         return queue_ids
 
     if plan is not None and pattern in plan.get("clusters", {}):
-        for issue_id in plan["clusters"][pattern].get("issue_ids", []):
+        for issue_id in cluster_issue_ids(plan["clusters"][pattern]):
             _append_unique(issue_id, seen, result)
     return queue_ids
 

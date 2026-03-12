@@ -17,7 +17,8 @@ SERVICE_ROLE_TOKEN_RE = re.compile(
 )
 
 AUTH_GUARD_TOKEN_RE = re.compile(
-    r"@(?:login_required|require_auth|auth_required|requires_auth|authenticated)\b"
+    r"@(?:login_required|require_auth|auth_required|requires_auth|authenticated"
+    r"|permission_required|staff_member_required)\b"
     r"|\brequireAuth\b|\bwithAuth\b|\bauthenticateRequest\b|\bverifyToken\b",
     re.IGNORECASE,
 )

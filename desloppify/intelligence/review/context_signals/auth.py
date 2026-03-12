@@ -166,6 +166,7 @@ def gather_auth_context(
     rls_enabled: set[str] = set()
     rls_policy_tables: set[str] = set()
     rls_table_files: dict[str, list[str]] = {}
+    rls_policy_files: dict[str, list[str]] = {}
     service_role_files: set[str] = set()
     auth_patterns: dict[str, int] = {}
     auth_guard_patterns: dict[str, int] = {}
@@ -206,7 +207,9 @@ def gather_auth_context(
         for match in _RLS_POLICY_RE.finditer(content):
             table = match.group(1)
             if table:
-                rls_policy_tables.add(_normalize_sql_ident(table))
+                normalized_table = _normalize_sql_ident(table)
+                rls_policy_tables.add(normalized_table)
+                rls_policy_files.setdefault(normalized_table, []).append(rpath)
 
         # Service role usage
         if (
@@ -229,9 +232,14 @@ def gather_auth_context(
 
     tables_without_rls = rls_tables - rls_enabled
     rls_files: dict[str, list[str]] = {
-        table: sorted(set(rls_table_files.get(table, [])))
+        table: sorted(
+            {
+                *rls_table_files.get(table, []),
+                *rls_policy_files.get(table, []),
+            }
+        )
         for table in sorted(tables_without_rls)
-        if table in rls_table_files
+        if table in rls_table_files or table in rls_policy_files
     }
     return AuthorizationSignals(
         route_auth_coverage=route_auth,

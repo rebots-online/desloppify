@@ -7,6 +7,7 @@ import re
 
 from desloppify.app.commands.helpers.runtime import command_runtime
 from desloppify.app.commands.helpers.state import require_issue_inventory
+from desloppify.app.commands.plan.shared.cluster_membership import cluster_issue_ids
 from desloppify.engine.plan_state import (
     load_plan,
     save_plan,
@@ -42,7 +43,7 @@ def _all_known_issue_ids(state: dict, plan: dict | None) -> list[str]:
             seen_ids.add(fid)
             all_ids.append(fid)
     for cluster in plan.get("clusters", {}).values():
-        for fid in cluster.get("issue_ids", []):
+        for fid in cluster_issue_ids(cluster):
             if fid not in seen_ids:
                 seen_ids.add(fid)
                 all_ids.append(fid)
@@ -138,7 +139,7 @@ def _cmd_cluster_add(args: argparse.Namespace) -> None:
     for other_name, other_cluster in plan.get("clusters", {}).items():
         if other_name == cluster_name or other_cluster.get("auto"):
             continue
-        other_ids = set(other_cluster.get("issue_ids", []))
+        other_ids = set(cluster_issue_ids(other_cluster))
         if not other_ids:
             continue
         overlap = member_set & other_ids

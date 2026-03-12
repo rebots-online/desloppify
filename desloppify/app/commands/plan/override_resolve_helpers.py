@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from desloppify.app.commands.plan.shared.cluster_membership import cluster_issue_ids
 from desloppify.base.output.terminal import colorize
 from desloppify.engine._plan.constants import (
     confirmed_triage_stage_names,
@@ -25,7 +26,7 @@ def check_cluster_guard(patterns: list[str], plan: dict, state: dict) -> bool:
             cluster = clusters[pattern]
             issue_ids = [
                 issue_id
-                for issue_id in cluster.get("issue_ids", [])
+                for issue_id in cluster_issue_ids(cluster)
                 if issue_id in issues and issues[issue_id].get("status") == "open"
             ]
             if len(issue_ids) == 0:

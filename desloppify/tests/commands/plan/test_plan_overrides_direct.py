@@ -71,6 +71,18 @@ def test_override_resolve_helpers_cover_synthetic_split_and_blocked_stages(capsy
     out = capsys.readouterr().out
     assert "mark them done individually first" in out
 
+    step_cluster_plan = {
+        "clusters": {
+            "step-cluster": {
+                "action_steps": [{"title": "Do auth fix", "issue_refs": ["i1", "i2"]}],
+            }
+        }
+    }
+    blocked_step_cluster = resolve_helpers_mod.check_cluster_guard(
+        ["step-cluster"], step_cluster_plan, state
+    )
+    assert blocked_step_cluster is True
+
 
 def test_override_resolve_cmd_confirm_requires_note(capsys) -> None:
     args = argparse.Namespace(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import desloppify.app.commands.exclude as exclude_cmd_mod
+import desloppify.app.commands.plan.shared.cluster_membership as plan_cluster_membership_mod
 import desloppify.app.commands.plan.shared.patterns as plan_resolve_mod
 import desloppify.app.commands.plan.cluster.dispatch as plan_cluster_handlers_mod
 import desloppify.app.commands.plan.cmd as plan_cmd_mod
@@ -35,6 +36,7 @@ import desloppify.languages.go.review as go_review_mod
 def test_direct_coverage_scan_plan_go_modules_smoke():
     assert callable(review_merge_mod.do_merge)
     assert callable(exclude_cmd_mod.cmd_exclude)
+    assert callable(plan_cluster_membership_mod.cluster_issue_ids)
     assert callable(plan_resolve_mod.resolve_ids_from_patterns)
     assert callable(plan_cluster_handlers_mod.cmd_cluster_dispatch)
     assert callable(plan_cmd_mod.cmd_plan)

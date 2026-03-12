@@ -6,6 +6,7 @@ import argparse
 
 from desloppify.app.commands.helpers.runtime import command_runtime
 from desloppify.app.commands.helpers.state import require_issue_inventory
+from desloppify.app.commands.plan.shared.cluster_membership import cluster_issue_ids
 from desloppify.app.commands.plan.shared.patterns import resolve_ids_from_patterns
 from desloppify.base.output.terminal import colorize
 from desloppify.engine.plan_state import (
@@ -25,7 +26,7 @@ def resolve_target(plan: dict, target: str | None, position: str) -> str | None:
     clusters = plan.get("clusters", {})
     if target not in clusters:
         return target
-    member_ids = clusters[target].get("issue_ids", [])
+    member_ids = cluster_issue_ids(clusters[target])
     if not member_ids:
         return target
     order = plan.get("queue_order", [])
