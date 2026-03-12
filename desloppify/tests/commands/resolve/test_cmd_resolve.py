@@ -1,6 +1,7 @@
 """Tests for desloppify.app.commands.resolve — resolve/ignore command logic."""
 
 import inspect
+from pathlib import Path
 
 import pytest
 
@@ -122,7 +123,7 @@ class TestCmdResolve:
             "scan_count": 1,
             "last_scan": "2025-01-01",
         }
-        monkeypatch.setattr(state_mod, "load_state", lambda sp: fake_state)
+        monkeypatch.setattr(resolve_mod, "load_state", lambda sp: fake_state)
         monkeypatch.setattr(
             state_mod,
             "resolve_issues",
@@ -157,7 +158,7 @@ class TestCmdResolve:
             "scan_count": 1,
             "last_scan": "2025-01-01",
         }
-        monkeypatch.setattr(state_mod, "load_state", lambda sp: fake_state)
+        monkeypatch.setattr(resolve_mod, "load_state", lambda sp: fake_state)
         monkeypatch.setattr(state_mod, "save_state", lambda state, sp: None)
         monkeypatch.setattr(
             state_mod,
@@ -170,8 +171,7 @@ class TestCmdResolve:
             lambda state, **kw: {"headline": "test", "milestone": None},
         )
 
-        # Mock _resolve_lang
-        monkeypatch.setattr(cli_mod, "resolve_lang", lambda args: None)
+        monkeypatch.setattr(resolve_mod, "resolve_lang", lambda args: None)
 
         class FakeArgs:
             status = "fixed"
@@ -201,7 +201,7 @@ class TestCmdResolve:
             "scan_count": 2,
             "last_scan": "2025-01-01",
         }
-        monkeypatch.setattr(state_mod, "load_state", lambda sp: fake_state)
+        monkeypatch.setattr(resolve_mod, "load_state", lambda sp: fake_state)
         monkeypatch.setattr(state_mod, "save_state", lambda state, sp: None)
         monkeypatch.setattr(
             state_mod,
@@ -213,7 +213,7 @@ class TestCmdResolve:
             "compute_narrative",
             lambda state, **kw: {"headline": "test", "milestone": None},
         )
-        monkeypatch.setattr(cli_mod, "resolve_lang", lambda args: None)
+        monkeypatch.setattr(resolve_mod, "resolve_lang", lambda args: None)
 
         class FakeArgs:
             status = "wontfix"
@@ -243,7 +243,7 @@ class TestCmdResolve:
             "scan_count": 1,
             "last_scan": "2025-01-01",
         }
-        monkeypatch.setattr(state_mod, "load_state", lambda sp: fake_state)
+        monkeypatch.setattr(resolve_mod, "load_state", lambda sp: fake_state)
         monkeypatch.setattr(state_mod, "save_state", lambda state, sp: None)
         monkeypatch.setattr(
             state_mod,
@@ -255,7 +255,7 @@ class TestCmdResolve:
             "compute_narrative",
             lambda state, **kw: {"headline": "test", "milestone": None},
         )
-        monkeypatch.setattr(cli_mod, "resolve_lang", lambda args: None)
+        monkeypatch.setattr(resolve_mod, "resolve_lang", lambda args: None)
 
         class FakeArgs:
             status = "open"
@@ -283,7 +283,7 @@ class TestCmdResolve:
             "scan_count": 1,
             "last_scan": "2025-01-01",
         }
-        monkeypatch.setattr(state_mod, "load_state", lambda sp: fake_state)
+        monkeypatch.setattr(resolve_mod, "load_state", lambda sp: fake_state)
         monkeypatch.setattr(
             state_mod,
             "resolve_issues",
@@ -309,7 +309,7 @@ class TestCmdResolve:
         assert "could not save state" in exc_info.value.message
 
     def test_large_wontfix_batch_requires_confirmation(self, monkeypatch, capsys):
-        monkeypatch.setattr(resolve_mod, "state_path", lambda a: "/tmp/fake.json")
+        monkeypatch.setattr(resolve_mod, "state_path", lambda a: Path("/tmp/fake.json"))
 
         fake_state = {
             "issues": {},
@@ -320,7 +320,7 @@ class TestCmdResolve:
             "scan_count": 12,
             "last_scan": "2026-01-01",
         }
-        monkeypatch.setattr(state_mod, "load_state", lambda sp: fake_state)
+        monkeypatch.setattr(resolve_mod, "load_state", lambda sp: fake_state)
         monkeypatch.setattr(
             resolve_selection_mod, "_preview_resolve_count", lambda state, patterns: 12
         )

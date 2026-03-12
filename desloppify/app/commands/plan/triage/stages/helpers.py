@@ -5,7 +5,7 @@ from __future__ import annotations
 from desloppify.base.output.terminal import colorize
 from desloppify.engine.plan_triage import TRIAGE_IDS
 
-from ..helpers import active_triage_issue_ids, cluster_issue_ids
+from ..helpers import cluster_issue_ids, live_active_triage_issue_ids
 
 
 def _require_triage_pending(plan: dict, *, action: str) -> bool:
@@ -101,10 +101,8 @@ def unclustered_review_issues(plan: dict, state: dict | None = None) -> list[str
         ]
         frozen_ids = (plan.get("epic_triage_meta", {}) or {}).get("active_triage_issue_ids")
         if isinstance(frozen_ids, list) and frozen_ids:
-            frozen_id_set = active_triage_issue_ids(plan, state)
+            frozen_id_set = live_active_triage_issue_ids(plan, state)
             review_ids = [fid for fid in review_ids if fid in frozen_id_set]
-            missing_frozen = [fid for fid in frozen_ids if isinstance(fid, str) and fid not in set(review_ids)]
-            review_ids.extend(missing_frozen)
     else:
         review_ids = [
             fid for fid in plan.get("queue_order", [])

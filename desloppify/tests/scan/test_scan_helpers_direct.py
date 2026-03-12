@@ -51,7 +51,7 @@ def test_warn_explicit_lang_with_no_files(monkeypatch, capsys, tmp_path):
 
     out = capsys.readouterr().out
     assert "No python source files found" in out
-    assert "--lang typescript" in out
+    assert "Omit `--lang` to auto-detect." in out
 
 
 def test_audit_excluded_dirs_reads_each_file_once(monkeypatch, tmp_path):

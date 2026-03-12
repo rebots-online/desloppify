@@ -251,7 +251,7 @@ class TestResolveLangPrecedence:
             lambda _args: type("L", (), {"name": "python"})(),
         )
         monkeypatch.setattr(
-            "desloppify.languages.get_lang",
+            "desloppify.app.commands.move.directory.lang_mod.get_lang",
             lambda name: captured.append(name) or FakeLang(),
         )
         monkeypatch.setattr(

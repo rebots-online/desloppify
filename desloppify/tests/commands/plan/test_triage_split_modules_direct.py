@@ -27,6 +27,7 @@ import desloppify.app.commands.plan.triage.validation.completion_policy as compl
 import desloppify.app.commands.plan.triage.validation.completion_stages as completion_stages_mod
 import desloppify.app.commands.plan.triage.validation.core as stage_validation_mod
 import desloppify.app.commands.plan.triage.validation.enrich_checks as enrich_checks_mod
+from desloppify.app.commands.plan.triage.runner.orchestrator_codex_pipeline_execution import StageExecutionResult
 from desloppify.base.exception_sets import CommandError
 
 
@@ -1464,7 +1465,7 @@ def test_run_codex_pipeline_raises_on_stage_failure(monkeypatch, tmp_path: Path)
     monkeypatch.setattr(
         orchestrator_pipeline_mod,
         "execute_stage_impl",
-        lambda *_args, **_kwargs: ("failed", {"status": "failed", "error": "boom"}),
+        lambda *_args, **_kwargs: StageExecutionResult(status="failed", payload={"status": "failed", "error": "boom"}),
     )
 
     services = SimpleNamespace(

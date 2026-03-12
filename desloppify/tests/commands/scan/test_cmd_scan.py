@@ -554,7 +554,7 @@ class TestWarnExplicitLangWithNoFiles:
         )
         out = capsys.readouterr().out
         assert "No typescript source files found" in out
-        assert "--lang python" in out
+        assert "Omit `--lang` to auto-detect." in out
 
     def test_no_warning_when_not_explicit(self, capsys, tmp_path):
         class FakeArgs:

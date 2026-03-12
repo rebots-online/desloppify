@@ -5,7 +5,10 @@ from __future__ import annotations
 import argparse
 from types import SimpleNamespace
 
-from desloppify.app.commands.plan.triage.helpers import apply_completion
+from desloppify.app.commands.plan.triage.helpers import (
+    apply_completion,
+    undispositioned_triage_issue_ids,
+)
 from desloppify.engine._plan.constants import (
     TRIAGE_STAGE_IDS,
     WORKFLOW_CREATE_PLAN_ID,
@@ -172,6 +175,14 @@ class TestApplyCompletionClearsTriageState:
         assert "active_triage_issue_ids" not in meta
         assert "undispositioned_issue_ids" not in meta
         assert "undispositioned_issue_count" not in meta
+
+    def test_undispositioned_ignores_frozen_ids_that_are_no_longer_open(self):
+        """Frozen triage IDs that vanished from state should not block recovery."""
+        state = _state_with_review_issues("r1")
+        plan = _plan_with_triage_and_workflow("r1")
+        plan["epic_triage_meta"]["active_triage_issue_ids"] = ["r1", "r2", "r3"]
+
+        assert undispositioned_triage_issue_ids(plan, state) == ["r1"]
 
     def test_triage_stages_cleared(self):
         """triage_stages dict must be empty after completion."""

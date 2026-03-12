@@ -55,6 +55,41 @@ def _is_review_queue_id(issue_id: str) -> bool:
     return issue_id.startswith("review::") or issue_id.startswith("concerns::")
 
 
+def _prune_stale_triage_meta(
+    plan: PlanModel,
+    *,
+    stale_ids: set[str],
+) -> None:
+    """Drop stale review IDs from triage recovery metadata."""
+    meta = plan.get("epic_triage_meta")
+    if not isinstance(meta, dict) or not stale_ids:
+        return
+
+    active_ids = meta.get("active_triage_issue_ids")
+    if isinstance(active_ids, list):
+        filtered_active = [
+            issue_id for issue_id in active_ids
+            if isinstance(issue_id, str) and issue_id not in stale_ids
+        ]
+        if filtered_active:
+            meta["active_triage_issue_ids"] = filtered_active
+        else:
+            meta.pop("active_triage_issue_ids", None)
+
+    undispositioned_ids = meta.get("undispositioned_issue_ids")
+    if isinstance(undispositioned_ids, list):
+        filtered_undispositioned = [
+            issue_id for issue_id in undispositioned_ids
+            if isinstance(issue_id, str) and issue_id not in stale_ids
+        ]
+        if filtered_undispositioned:
+            meta["undispositioned_issue_ids"] = filtered_undispositioned
+            meta["undispositioned_issue_count"] = len(filtered_undispositioned)
+        else:
+            meta.pop("undispositioned_issue_ids", None)
+            meta.pop("undispositioned_issue_count", None)
+
+
 def _prune_stale_review_ids_from_plan(
     plan: PlanModel,
     *,
@@ -80,6 +115,7 @@ def _prune_stale_review_ids_from_plan(
     stale_set = set(stale_ids)
     order[:] = [issue_id for issue_id in order if issue_id not in stale_set]
     prune_promoted_ids(plan, stale_set)
+    _prune_stale_triage_meta(plan, stale_ids=stale_set)
 
     deferred = plan.get("deferred")
     if isinstance(deferred, list):

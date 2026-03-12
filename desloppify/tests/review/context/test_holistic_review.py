@@ -1559,7 +1559,11 @@ class TestBuildInvestigationBatches:
             "architecture": {
                 "god_modules": [{"file": "core.py", "importers": 10, "excerpt": "..."}],
             },
-            "coupling": {},
+            "coupling": {
+                "boundary_violations": [
+                    {"file": "core.py", "detail": "crosses module boundary"}
+                ],
+            },
             "conventions": {
                 "sibling_behavior": {
                     "commands/": {
