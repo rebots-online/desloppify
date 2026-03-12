@@ -16,6 +16,8 @@ These have custom detectors, language-specific smell analysis, subjective review
 | **GDScript** | `gdscript/` | Godot scene-aware, tree-sitter phases, shared framework helpers |
 | **Go** | `go/` | golangci-lint + go vet adapters, regex function extraction, test coverage mapping |
 
+For C/C++ setup requirements for a full tool-backed scan, see `cxx/README.md`.
+
 Example: `python/` — see `python/__init__.py` for the full plugin registration flow (`register_full_plugin(...)`) with 15+ detector phases, custom extractors, security hooks, and review guidance.
 
 ## Generic Plugins
